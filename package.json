@@ -2,6 +2,8 @@
   "name": "laikela",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "MathsionYang",
   "description": "来客啦 · AI 内容营销专家 — AI 内容生产工作台",
   "scripts": {
     "dev": "next dev",

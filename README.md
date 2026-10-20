@@ -10,8 +10,9 @@
 ![Tailwind](https://img.shields.io/badge/Tailwind_CSS-v4-0D0F12?logo=tailwindcss&logoColor=D8A85E)
 ![Tools](https://img.shields.io/badge/Abilities-15-D8A85E?labelColor=0D0F12)
 ![Version](https://img.shields.io/badge/Version-v0.1.0-1D9E75?labelColor=0D0F12)
+![License](https://img.shields.io/badge/License-MIT-D8A85E?labelColor=0D0F12)
 
-[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界)
+[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界) · [**许可**](#-license)
 
 ---
 
@@ -316,7 +317,11 @@ worker/index.ts               BullMQ 消费者入口
 
 ## 📜 License
 
-仓库为私有项目，未声明开源许可。如需授权请联系作者。
+本项目基于 [MIT License](LICENSE) 开源发布，Copyright (c) 2026 [MathsionYang](https://github.com/MathsionYang)。
+
+简单说：你可以自由使用、修改、分发、商用，也可以闭源二次开发，只需在副本中保留版权声明与许可声明。软件按「现状」提供，不含任何担保。
+
+> **注意**：MIT 覆盖的是本仓库的代码。通过本项目调用的第三方模型（DeepSeek、豆包、Seedream、Seedance 等）仍受各自厂商的服务条款与内容合规要求约束；模型输出的内容版权归属，请以对应厂商协议为准。
 
 ---
 
