@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" fill="none" role="img">
+  <title>来客啦 · AI 内容营销专家</title>
+  <rect width="1200" height="280" fill="#0D0F12"/>
+
+  <g stroke="#D8A85E" stroke-opacity="0.16">
+    <circle cx="978" cy="140" r="118"/>
+    <circle cx="978" cy="140" r="82"/>
+    <circle cx="978" cy="140" r="46"/>
+  </g>
+  <g fill="#D8A85E">
+    <circle cx="978" cy="22" r="3" fill-opacity="0.55"/>
+    <circle cx="1096" cy="140" r="3" fill-opacity="0.35"/>
+    <circle cx="978" cy="258" r="3" fill-opacity="0.2"/>
+    <circle cx="860" cy="140" r="3" fill-opacity="0.35"/>
+    <circle cx="1056" cy="62" r="2.2" fill-opacity="0.5"/>
+    <circle cx="900" cy="218" r="2.2" fill-opacity="0.3"/>
+  </g>
+  <g stroke="#D8A85E" stroke-opacity="0.5" stroke-width="1">
+    <path d="M700 140h96"/>
+    <path d="M978 140h116"/>
+  </g>
+
+  <rect x="44" y="44" width="2" height="192" fill="#D8A85E"/>
+
+  <rect x="74" y="46" width="30" height="30" rx="5" fill="#D8A85E"/>
+  <text x="89" y="66" text-anchor="middle" font-family="'Songti SC','STSong',SimSun,'Noto Serif CJK SC','Source Han Serif SC',Georgia,serif" font-size="17" font-weight="500" fill="#0D0F12">来</text>
+
+  <text x="118" y="65" font-family="'Helvetica Neue',Arial,sans-serif" font-size="11" letter-spacing="3.2" fill="#8A8175">LAIKELA · AI CONTENT WORKBENCH</text>
+
+  <text x="72" y="170" font-family="'Songti SC','STSong',SimSun,'Noto Serif CJK SC','Source Han Serif SC',Georgia,serif" font-size="56" font-weight="500" fill="#F5F1E8">来客啦</text>
+
+  <text x="74" y="208" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" fill="#A39B8D">15 项 AI 内容能力，一条任务链路</text>
+  <text x="74" y="234" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="12.5" fill="#6E675C">输入 → 生成 → 审核 → 素材归档 → 用量与积分结算</text>
+</svg>
