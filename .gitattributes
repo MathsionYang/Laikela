@@ -1,0 +1,6 @@
+# Windows 批处理必须用 CRLF，否则 cmd.exe 会把行切错、报
+# "'xxx' 不是内部或外部命令"。这里只对脚本类文件强制行尾，
+# 不给全仓设 eol，避免历史文件在 checkout 时整体重写。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

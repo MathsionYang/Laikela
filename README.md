@@ -30,6 +30,44 @@
 
 ---
 
+## 🖼 界面预览
+
+以下截图取自本地 `npm run serve` 的真实运行状态，**没有 mock 数据**：任务、素材、积分、成本都是这台机器上真跑出来的（1440×900）。
+
+**工作台** —— 本月产出、审核通过率、正在跑的任务、剩余积分四张卡；下方是 30 天产能趋势与生成队列，左侧为六组导航。
+
+![工作台总览](docs/screenshots/workspace.png)
+
+**全部能力** —— 15 个工具按文案 / 图片 / 视频 / 数字人 / 增长五条产线归档，每个卡片直接标出预计耗时、扣多少积分、被用过几次。
+
+![15 项能力总览](docs/screenshots/tools.png)
+
+**智能文案** —— 左边是结构化输入（品类、平台、时长、卖点），中间是 Block 编辑器里的真实产出，右边同一屏标出模型、用时、扣分与计费方式，以及可回看的历史版本。
+
+![智能文案工作区](docs/screenshots/tool-copy.png)
+
+**素材库** —— 文字、图片、音频、视频、分镜、时间轴七档分类；缩略图可预览、可下载、可删除，「全部」只列成品，分镜和中间产物收在各自分档里。
+
+![素材库](docs/screenshots/library.png)
+
+**订阅与积分** —— 当前余额、本月发放 / 消耗 / 自动退回，四档套餐的积分池、并发数、席位与费率差异一屏可比。
+
+![订阅与积分](docs/screenshots/billing.png)
+
+**模型接入** —— 平台 Key 与 BYOK 并存，Key 加密落库、前端只回显末四位；也支持填 Base URL + 模型名接任意 OpenAI 兼容端点。
+
+![模型接入](docs/screenshots/models.png)
+
+**管理台** —— 依赖自检（PostgreSQL / Redis / 对象存储）、模型路由的可用与已配置状态、逐个工具的开关与用量。
+
+![管理台](docs/screenshots/admin.png)
+
+**登录** —— 邮箱验证码注册，本机未配 SMTP 时验证码写到控制台，管理员账号可一键填入。
+
+![登录](docs/screenshots/login.png)
+
+---
+
 ## 🚀 三分钟跑起来
 
 ```bash
@@ -49,11 +87,32 @@ npm run dev:all
 # 5) 生产
 npm run build && npm start
 
-# 6) 改过定价/计费量就跑一遍，任何一档亏钱会以退出码 1 拦住你
+# 6) 改过定价/计费量就跑一遍，规则不完整会以退出码 1 拦住你
 npm run check:margin
 ```
 
-打开 <http://localhost:3000> ，用演示账号登录：
+### 一键启动（本地自测）
+
+上面六步不想记，直接双击根目录的 **`start.bat`**（Windows）。它按顺序做这些事：
+
+1. 查 Node 版本（< 20 直接拦住）与 `node_modules`，缺依赖自动 `npm install`
+2. 拉起 PostgreSQL / Redis；**没装 Docker 就自动降级** PGlite + 进程内队列，不会启动失败
+3. 检查端口占用（`--force` 才会杀进程，默认只提示）
+4. 对比 `src/` 与 `.next/BUILD_ID` 的时间戳，**只有源码变了才重建**
+5. 起服务，轮询 `/api/health`，打印依赖状态、可用模型通道与登录账号
+
+```bash
+npm run serve                  # 生产模式，端口 3000
+npm run serve -- --dev         # 开发模式，跳过构建，改代码即时生效
+npm run serve -- --port=3100   # 换端口
+npm run serve -- --force       # 端口被旧进程占住时强制结束
+npm run serve -- --no-docker   # 完全不碰 Docker
+npm run serve -- --check       # 起来后再跑计费规则校验与模型连通性自检
+```
+
+按 `Ctrl+C` 停止，会连带结束 Next 子进程，不留孤儿进程。
+
+打开 <http://localhost:3000> ，用管理员账号登录：
 
 | 账号 | 口令 | 角色 | 初始状态 |
 | --- | --- | --- | --- |
@@ -70,17 +129,17 @@ npm run check:margin
 | `登录成功却立刻掉线` | http 环境下 `COOKIE_SECURE=1`，cookie 不回传 | 本机改成注释或 `0`，上了 HTTPS 再打开 |
 | 改了 `.env` 里的 Key 但没生效 | Key 在模块加载时读入 | 重启进程；BYOK 与自定义端点则即时生效 |
 | 任务卡在 `queued` 不动 | 没起 Worker | `npm run worker`，或用 `npm run dev:all` |
+| 双击 `start.bat` 满屏 `'xxx' 不是内部或外部命令` 且带乱码 | 文件被存成含中文的 UTF-8/GBK，`chcp` 换代码页后 cmd 按旧字节偏移切行 | `start.bat` 必须**纯 ASCII + CRLF**（已由 `.gitattributes` 强制）；中文只放在 Node 的输出里 |
 
 ---
 
 ## 📦 15 项能力总览
 
-表里的**积分是本地引擎下的实际扣分**，跑云端模型会按模型单价实时变价（同一个工具最多差 30 倍）；
+表里的**积分是本地引擎下的实际扣分**，跑云端模型会按所选模型实时变价；
 **耗时是基线估值**，实际卡片会显示近 90 天同档引擎的实测中位数。
 
 计费量按实际产出算 —— 出 4 张扣 4 张、出 60 秒扣 60 秒、文案越长扣越多。
 卡片价、配置页预览价、提交时的扣费三处共用同一个函数 `quoteCost()`，不存在两套数字。
-完整推导与正收益校验见 [`docs/PRICING.md`](docs/PRICING.md)（`npm run check:margin`）。
 
 ### 📝 文案 · 1 积分起
 
@@ -151,29 +210,8 @@ queued → running → post_processing → reviewing → succeeded
 | 月度发放 | `grant:<org>:<自然月>` | 反复升降级刷额度（每换一次套餐就发一次） |
 | 退款额度 | 取该 job 的 consume 绝对值；无扣减则 `applied:false` | 没扣过钱的任务「退款」凭空造出积分 |
 
-计费口径（完整推导见 [`docs/PRICING.md`](docs/PRICING.md)）：
-
-```
-计费量（units）：由 ToolDef.billing 按**实际产出**换算
-  出图 → 张数（1 / 2 / 3 / 4 / 9）    出片 → 秒数（15 / 30 / 60，口播按字数÷5）
-  配音 → 千字符（字数÷1000）           文案 → K token（篇幅档位 0.6× / 1× / 1.8×）
-
-token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
-  平台代付 Key        → ceil(成本 × 计费量 × (1 + 费率))   费率 5% / 4.5% / 4% / 3%
-  自带 Key / 自定义端点 → ceil(成本 × 计费量 × 费率)         模型费用户直接付给厂商
-  最低扣分            → 1 积分（低于 1 分钱的交易财务上不可结算）
-
-套餐层：月费 = token 成本 + 固定成本（¥19.2/月）+ 利润
-  额度上限 = (月费 × 0.8 − 固定成本) ÷ 最坏每积分成本(0.957 分)
-  创作版 6,000 / 工作室 22,000 / 企业版 95,000 —— 额度用满也不亏
-
-单一事实来源：卡片价、配置页预览价、提交扣费都走 lib/domain/pricing.ts#quoteCost，
-`npm run check:margin` 按真实代码把「15 工具 × 全部模型 × 四档套餐」逐格算一遍，亏一格就退出码 1。
-```
-
-成本取供应商官方牌价（DeepSeek V4 Flash 输入 1 元 / 输出 2 元每百万 token，豆包 Seed 2.1 Pro 6 / 30 元），
-`unitPrice` 写在 `src/lib/ai/catalog.ts`，费率写在 `src/lib/domain/pricing.ts`，两边都可独立调。
-**压力测试结论：三档套餐在「额度 100% 用满 + 全选最贵模型」下净利率 22%–23%。**
+计费规则的**单一事实来源**是 `src/lib/domain/pricing.ts`：计费量由 `ToolDef.billing` 按实际产出换算（出图按张、出片按秒、配音按千字符、文案按篇幅档位），
+卡片报价、配置页预览价与提交扣费共用同一个 `quoteCost()`，不存在「界面一套数字、扣费另一套」的情况。
 
 失败 / 取消 → 全额退回，幂等。
 
@@ -200,9 +238,12 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 
 - **存储位置**：默认 `./data/storage/{orgId}/jobs/{jobId}/…`（`STORAGE_DRIVER=local`，零额外依赖）；改成 `s3` 后同一套 key 结构进桶，代码不用动。
 - **下载走 `/api/assets/[id]/download`**，不是签名 URL。签名 URL 里只有存储 key（`final-1.png`），落地文件名会变成这串机器名；这个口子会带上素材名并做 RFC 5987 编码，中文文件名不乱码。
-- **删除是真删**：先删存储文件（含缩略图、`asset_versions` 里的历史版本），再删数据库行。只删行不删文件，本地目录会越攒越大且再也无法回收。
+- **删除是真删**：先删存储文件（含缩略图、`asset_versions` 里的历史版本），再删数据库行。只删行不删文件，本地目录会越攒越大且再也无法回收。界面上点垃圾桶会弹确认框（列出素材名与大小），不再用「再点一次」的短暂时窗 —— 那个设计会让人以为点了没反应。文件被占用（Windows 上正在播放的视频）时记录会照删、日志留 `[assets] 文件回收失败` 并带出 key，提示里的「回收 N 个文件」只统计真删掉的，不虚报。
 - **编辑同步**：在文案编辑器里改完保存，素材库那份 `.md` 会一起更新 —— 否则用户下载到的是第一次生成的旧稿。
 - **缩略图单独一行**：`role='thumbnail'` 的素材不占列表位置，只作为图片/视频的 `thumbUrl`；素材多的账号不会因为拖 1080px 原图而吃掉几百 MB 流量。
+- **列表只列成品**：默认视图是 `role in (final, original)`，即每个任务真正交付的东西。分镜关键帧（`proxy`）与 `timeline.json`（`metadata`）属于任务的中间产物，翻到「分镜」「文件」分档才出现 —— 否则一个视频任务就会往首屏塞 6 张几乎一样的画面。
+- **重复素材清理**：`npm run assets:dedupe` 预演，`npm run assets:dedupe -- --apply` 执行。规则是同 `kind` 同名的只留最新一条，缩略图跟随父素材；执行前把「留什么、删什么」全量写进 `data/backup/dedupe-assets-<时间戳>.json`，可人工回滚。
+- **孤儿文件回收**：`npm run assets:gc` 扫「磁盘有、库里没引用」的文件，`--apply` 真删。文件删除失败（被占用、宿主钩子拦截）时记录会照删、文件留在盘上，这个命令负责把它们收回来。
 
 ### 计费与素材是同一条链路
 
@@ -211,7 +252,7 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 两个容易出错的点已经修掉：
 
 - **失效 Key 不再被自动选中。** 上次调用 401 的 Key 依然可用（不做永久封禁），但自动路由会把它排到本地引擎后面 —— 否则卡片写着「豆包 · 20 秒」，跑起来却掉回本地，报价和实际执行是两张皮。
-- **降级按实际引擎重新结账。** 云端失败回落本地后，`output.billing` 记录 `charged / actual / refunded`，多收的积分自动退回（只退不补：事后加价等于暗改价格）。`npm run check:margin` 会按真实计价代码逐格验算成本与毛利。
+- **降级按实际引擎重新结账。** 云端失败回落本地后，`output.billing` 记录 `charged / actual / refunded`，多收的积分自动退回（只退不补：事后加价等于暗改价格）。
 
 ---
 
@@ -244,7 +285,7 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 
 ### 人工转账：拿到商户号之前的正式通道
 
-个人主体拿不到微信/支付宝的收款 API（原因见 [`docs/PAYMENT-ACCESS.md`](docs/PAYMENT-ACCESS.md)），所以这条链路是**现在的正式通道**，不是临时补丁：
+个人主体拿不到微信/支付宝的收款 API（资质门槛所致），所以这条链路是**现在的正式通道**，不是临时补丁：
 
 ```
 用户在 /billing 看到收款信息 → 转账 → 提交金额/单号/付款人
@@ -264,7 +305,7 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 
 | 层级 | 配置位置 | 谁付费 | 生效方式 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| ① 平台托管 Key | `.env` 的 `DEEPSEEK_API_KEY` / `DOUBAO_API_KEY` | 平台 | 重启进程 | 自己运营，所有租户共用 |
+| ① 平台托管 Key | `.env` 的 `DEEPSEEK_API_KEY` / `DOUBAO_API_KEY` / `BAILIAN_API_KEY` | 平台 | 重启进程 | 自己运营，所有租户共用 |
 | ② 租户 BYOK | 登录后 `/settings/models` → 供应商凭证 | 用户 | 即时 | 让客户带自己的厂商 Key |
 | ③ 自定义端点 | `/settings/models` → 接入任意兼容模型 | 用户 | 即时 | 自建 vLLM / Ollama、中转站、Azure… |
 
@@ -273,21 +314,69 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 改 `.env`：
 
 ```ini
-# DeepSeek：文本主力
+# DeepSeek：文本主力（当前线上配置）
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-flash          # 必须是 GET /models 返回的 id，不是展示名
 
 # 豆包 · 火山方舟：同时驱动文本 / Image 2.5 / Seedance 2.5 / 语音
 DOUBAO_API_KEY=xxxxxxxx-xxxx-xxxx
 DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 DOUBAO_MODEL=doubao-pro-32k
+
+# 阿里百炼（专属网关）：文本 / 出图 / 出片；语音未开放（见 docs/ALIYUN-BAILIAN-TEST.md）
+BAILIAN_API_KEY=sk-ws-xxxxxxxx
+BAILIAN_BASE_URL=https://ws-xxxxxxxx.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+BAILIAN_TEXT_MODEL=qwen3.8-flash
+BAILIAN_IMAGE_MODEL=qwen-image-2.1-turbo
 ```
 
+**阿里百炼的四个坑**（都踩过，实测记录见 `docs/ALIYUN-BAILIAN-TEST.md`）：
+
+| 坑 | 表现 | 处理 |
+|---|---|---|
+| 两套路径 | 文本/图像在 `/compatible-mode/v1`，视频在根路径 `/api/v1/...` | 适配层 `dashscopeHost()` 剥 host，不能拼同一个 baseUrl |
+| 视频要异步头 | 不带 `X-DashScope-Async: enable` 直接 400 | 提交后轮询 `/api/v1/tasks/{id}`，5 秒任务约 3 分钟 |
+| usage 两套字段 | 2.x 是 `width/height`，3.0 是 `output_width/output_height` | 尺寸以请求参数为准，usage 只做参考 |
+| 语音不可用 | `/audio/*` 全 404，TTS 型号额度耗尽（403） | 语音继续走本地音轨合成 |
+
 - 改完**必须重启**（`npm start` / `npm run dev`），Key 在模块加载时读入。
+- 当前 DeepSeek 账号可用的模型 id 只有两个：`deepseek-flash`（V4.1 Flash，1M 上下文）和 `deepseek-v4-pro`。
+  目录里的 `deepseek-chat` / `deepseek-reasoner` 是**内部 key**，发给供应商的 `model` 字段由 `src/lib/ai/model-name.ts` 决定：前者跟 `DEEPSEEK_MODEL`，后者固定 `deepseek-v4-pro`。
+- **配完先自检**，别等用户在界面上看到「调用失败」：
+
+```bash
+npm run check:ai
+# OK  鉴权 /models          2 个模型可用 · 522ms · deepseek-flash、deepseek-v4-pro
+# OK  目录 deepseek-chat    modelName=deepseek-flash 存在
+# OK  chat/completions      deepseek-flash · 924ms · in 81 / out 35 tok · ¥0.000211
+```
+
+  它做三件事：验 Key、把目录里的模型名与账号实际名单对一遍、真发一次 JSON 模式请求。
+  `npm run doctor` 也会探一次，但只做前两步（快、省 token）。
 - **一个 Key 覆盖该厂商全部模型**：豆包那把同时给 `doubao-pro-32k`、`doubao-image-2.5`、`doubao-seedance-2.5`、`doubao-tts` 用。
 - 不配也能跑：路由自动落到本地引擎（规则文案 / 字体排版 / 分镜渲染 / 音轨合成），产出结构完全一致。
 - `CREDENTIAL_SECRET` 是加密 BYOK 与端点 Key 的主密钥，不配则用 `SIGNING_SECRET` 派生；**一旦库里有历史凭证就不要再换**，否则旧密文解不开。
+
+#### 调用失败怎么读错误
+
+错误消息统一由 `src/lib/ai/adapters.ts` 生成，格式是
+`{供应商}（model={实际模型名}）返回 {状态码}。上游说明：{原文}。{人话结论 + 下一步}`，
+任务失败时界面上显示的就是这句，`error_code` 单独给出机器可读的分类：
+
+| `error_code` | 典型上游 | 真正原因 | 处置 |
+|---|---|---|---|
+| `AUTH` | 401 `Authentication Fails` | Key 无效 / 过期 / 未开通该模型 | 换 Key，重启进程 |
+| `MODEL_NOT_FOUND` | **400** `The supported API model names are …` | 模型名写错。注意 DeepSeek 给的是 400 不是 404，肉眼很像「Key 坏了」 | 对照 `GET /models` 改 `DEEPSEEK_MODEL` |
+| `QUOTA` | 402 / `insufficient balance` | 余额不足 | 充值 |
+| `RATE_LIMIT` | 429 | 触发限流 | 降并发 / 稍后重试 |
+| `CONTEXT_TOO_LONG` | 400 `maximum context` | 输入超窗口 | 精简输入 |
+| `TIMEOUT` / `NETWORK` | — | 45 秒无响应 / 出网不通 | 查代理、DNS、防火墙 |
+| `TRUNCATED` | `finish_reason=length` | `max_tokens` 用尽，只产出了推理过程没有正文 | 调大 `maxTokens` |
+| `EMPTY` | 200 但 `content` 为空 | 只回了 `reasoning_content`，或被安全策略拦 | 换模型 / 收紧输入 |
+
+远端彻底失败时任务**不会失败**，会降级到本地引擎并在结果上方挂一条黄色说明
+（`output.degraded`），里面带同一个 `error_code`，积分按本地模型重算并退回差额。
 
 ### ② 租户 BYOK（同一厂商换自己的钥匙）
 
@@ -403,15 +492,15 @@ worker/index.ts               BullMQ 消费者入口
 
 诚实列出，避免接手的人踩空：
 
-- **在线支付未接，当前收款走人工转账。** `POST /api/billing` 的 mock 通道点开通即写 `paid`（仅演示用）；真实收款链路是「用户转账 → 提交单号 → 管理员核对 → 发额度」（见上文「人工转账」）。接微信/支付宝要拆成「下单 → 回调验签 → 幂等激活」两阶段交割，当前 `startSubscription()` 是单事务一把梭，需重构。个人主体接入的可行性、主体门槛与通道选型见 [`docs/PAYMENT-ACCESS.md`](docs/PAYMENT-ACCESS.md)。
-- **真实云端模型未联调。** 本地引擎与 mock OpenAI 端点已端到端验证；真实 DeepSeek / 豆包 Key 未配置，故 401/429/5xx 映射、Seedance 异步任务轮询、TTS 真实音色均未在真实厂商环境验证。
+- **在线支付未接，当前收款走人工转账。** `POST /api/billing` 的 mock 通道**默认关闭**（`PAYMENT_MOCK=1` 才开，仅供本机自动化测试），关闭时自助开通一律返回 `PAYMENT_NOT_READY` 并引导走人工转账；真实收款链路是「用户转账 → 提交单号 → 管理员核对 → 发额度」（见上文「人工转账」）。接微信/支付宝要拆成「下单 → 回调验签 → 幂等激活」两阶段交割，当前 `startSubscription()` 是单事务一把梭，需重构。
+- **云端模型已联调（DeepSeek + 阿里百炼）。** DeepSeek `deepseek-flash` 与百炼 `qwen-image-2.1-turbo` / `wan3.0-video` 均跑通端到端（含异步任务轮询与成片落库），401 / 400 模型名错 / 429 / 额度不足的映射已按真实返回校准。**百炼语音（TTS/ASR）不可用**：网关未开放 `/audio/*`，清单内 TTS 型号免费额度已耗尽 —— 详见 [`docs/ALIYUN-BAILIAN-TEST.md`](docs/ALIYUN-BAILIAN-TEST.md)。豆包 Seedance 与 TTS 仍未在真实环境验证。
 - **视频不做本地 mp4 编码。** 本机无 FFmpeg，输出为「分镜关键帧 + `timeline.json` 时间轴 + 云端成片（Seedance 可用时）」。
 - **自定义端点只支持 `text` 与 `image`。** `video` / `audio` 需厂商专有协议，走内置目录。
 - **没有找回密码。** 注册有邮箱验证（验证码 + 冷却 + 次数上限），但「忘记密码」还没做，目前只能由管理员在库里重置。补这条链路时可以直接复用 `email_verifications` 表（`purpose='reset'` 字段已留位）。
 - **无成员邀请与角色管理 UI。** `owner` / `admin` / `member` 角色枚举已存在，只有 owner 能改模型凭证。
 - **`next dev` 下 React hydration 有 HMR 握手问题**（Turbopack websocket），`next start` 正常，不影响交付。
-- **降级重算只退不补。** 云端失败回落本地后，按实际执行的引擎重算并退回差额（`output.billing` 有明细）。如果反过来算出来更贵（比如 BYOK 服务费低于本地引擎成本），不会事后加价 —— 差额由平台吸收。
-- **计费量里仍有估算成分。** `billing.base` 的取值是按表单档位与流水线实际产出对齐的，但文本类 token 数还是估的；上线两周后应按 `usage_records` 的 P90 回填，再跑 `npm run check:margin`。
+- **降级重算只退不补。** 云端失败回落本地后，按实际执行的引擎重算并退回差额（`output.billing` 有明细）。如果反过来算出来更贵，不会事后加价 —— 差额由平台吸收。
+- **计费量里仍有估算成分。** `billing.base` 按表单档位与流水线实际产出对齐，但文本类 token 数是估算值；上线两周后按 `usage_records` 的 P90 回填校准。
 - **素材没有回收站。** `DELETE /api/assets/[id]` 是硬删除（文件 + 记录），删掉不可恢复；删除写 `audit_logs` 留痕，但不保留副本。需要「误删恢复」的话，得加 `deleted_at` 软删与到期清理。
 - **无单元测试与 CI。** 验证方式是端到端探针脚本，未沉淀成测试用例。
 

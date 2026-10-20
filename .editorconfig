@@ -1,0 +1,12 @@
+root = true
+
+# start.bat 必须是纯 ASCII + CRLF：
+# cmd.exe 读到 chcp 时切换代码页，文件里只要还有非 ASCII 字节，
+# 后续行就会按旧字节偏移被切断，报 "'板惎鍔?echo' 不是内部或外部命令"。
+[*.bat]
+end_of_line = crlf
+insert_final_newline = true
+
+[*.cmd]
+end_of_line = crlf
+insert_final_newline = true
