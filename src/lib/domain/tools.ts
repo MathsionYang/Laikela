@@ -32,6 +32,29 @@ export interface ToolField {
   accept?: string;
 }
 
+/**
+ * 计费口径。**唯一的真相**：卡片上写的积分、提交时扣的积分，都由它换算出来。
+ *
+ * base 是「默认输入」下的计费量；scale / perChars 描述输入变化时计费量怎么变。
+ * 之所以不写死一个 creditCost，是因为同一个工具出 1 张图和出 9 张图、
+ * 出 15 秒片和出 60 秒片的成本差好几倍，写死必然有一头是错的。
+ */
+export interface BillingRule {
+  /** 默认输入下的计费量（千 token / 张 / 秒 / 千字符） */
+  base: number;
+  /** 选项 → 倍率，与 base 相乘；未命中按 1 处理 */
+  scale?: Array<{ field: string; map: Record<string, number> }>;
+  /** 按文案字数换算计费量（units = 字数 / charsPerUnit，取与 base 的较大者） */
+  perChars?: { field: string; charsPerUnit: number };
+  /**
+   * 明确声明**不参与计费**的字段，必须同时写进 billingNote 说明原因。
+   * 例：超级混剪的「变体数量」只影响文案组合矩阵，实际只渲染 2 款样片，
+   * 所以计费不随它变 —— 与其假装按 20 条收费，不如把话说清楚。
+   * scripts/check-margin.ts 会拿这个白名单核对，漏写就报错。
+   */
+  ignored?: string[];
+}
+
 export interface ToolDef {
   slug: string;
   section: SectionId;
@@ -39,21 +62,18 @@ export interface ToolDef {
   /** 卡片副标题 */
   tagline: string;
   kind: ToolKind;
-  etaSeconds: number;
   /**
-   * 该任务在**基准模型**下的标准扣分（积分），用于卡片展示与末位兜底。
-   * 真实扣费由 quoteCost(tool, model, plan) 按模型单价实时算，见 lib/ai/router.ts。
+   * 无实测样本时的耗时基线（秒）。有实测数据时以实测中位数为准，
+   * 见 lib/ai/tool-quotes.ts —— 这里的值只在冷启动阶段兜底。
    */
-  creditCost: number;
+  etaBaseline: number;
   /**
-   * 该任务的**计费量**，单位随任务的产出类型走：
-   *   copy  → 千 token（输入+输出加权）
-   *   image → 张
-   *   video → 秒
-   *   audio → 千字符
-   * 乘上所选模型的 unitPrice 就是成本价，这是「换模型不同价」的唯一依据。
+   * 计费量口径。真实扣费 = unitsOf(tool, input) × 模型单价 × (1 + 套餐费率)，
+   * 卡片、配置页预览、服务端扣费三处共用同一函数（lib/domain/pricing.ts）。
    */
-  costUnits: number;
+  billing: BillingRule;
+  /** 计费方式的补充说明，展示在价格旁（例如「按出图张数计费」） */
+  billingNote?: string;
   badge?: "new" | "hot";
   icon: IconName;
   art: string;
@@ -142,9 +162,9 @@ export const TOOLS: ToolDef[] = [
     name: "智能文案",
     tagline: "给一个想法，产出标题、卖点、正文与 CTA。",
     kind: "copy",
-    etaSeconds: 20,
-    creditCost: 1,
-    costUnits: 4.0,
+    etaBaseline: 20,
+    billing: { base: 4, scale: [{ field: "length", map: { "短 · 150 字": 0.6, "标准 · 400 字": 1, "长 · 800 字": 1.8 } }] },
+    billingNote: "按篇幅计费（标准 400 字为基准）",
     badge: "hot",
     icon: "pen",
     art: "/assets/tools/copy-smart.jpg",
@@ -167,9 +187,8 @@ export const TOOLS: ToolDef[] = [
     name: "产品文案",
     tagline: "把产品参数翻译成用户听得懂的卖点。",
     kind: "copy",
-    etaSeconds: 25,
-    creditCost: 1,
-    costUnits: 5.5,
+    etaBaseline: 25,
+    billing: { base: 5.5 },
     icon: "tag",
     art: "/assets/tools/copy-product.jpg",
     outcome: "卖点排序 / 详情页文案 / 广告语 / 禁用承诺检查",
@@ -187,9 +206,9 @@ export const TOOLS: ToolDef[] = [
     name: "爆款选题",
     tagline: "结合赛道与热点，给出可执行的选题清单。",
     kind: "copy",
-    etaSeconds: 30,
-    creditCost: 1,
-    costUnits: 5.0,
+    etaBaseline: 30,
+    billing: { base: 5, scale: [{ field: "count", map: { "5 个": 1, "10 个": 1.8, "20 个": 3.2 } }] },
+    billingNote: "按输出数量计费",
     icon: "bulb",
     art: "/assets/tools/copy-topic.jpg",
     outcome: "选题卡（标题 / 切入角 / 预估热度 / 竞争度）",
@@ -210,9 +229,8 @@ export const TOOLS: ToolDef[] = [
     name: "人设文案",
     tagline: "把账号语气与价值观沉淀成可复用的写作人格。",
     kind: "copy",
-    etaSeconds: 20,
-    creditCost: 1,
-    costUnits: 4.0,
+    etaBaseline: 20,
+    billing: { base: 4 },
     badge: "new",
     icon: "mask",
     art: "/assets/tools/copy-persona.jpg",
@@ -236,9 +254,9 @@ export const TOOLS: ToolDef[] = [
     name: "灵感成画",
     tagline: "文字 + 参考图，生成一组有方向的视觉素材。",
     kind: "image",
-    etaSeconds: 40,
-    creditCost: 3,
-    costUnits: 1,
+    etaBaseline: 40,
+    billing: { base: 1, scale: [{ field: "count", map: { "1 张": 1, "2 张": 2, "4 张": 4 } }] },
+    billingNote: "按出图张数计费",
     icon: "palette",
     art: "/assets/tools/image-gen.jpg",
     outcome: "多张 PNG（含缩略图与生成参数）",
@@ -260,9 +278,9 @@ export const TOOLS: ToolDef[] = [
     name: "海报设计",
     tagline: "活动信息自动排版，直出可发布的社媒海报。",
     kind: "image",
-    etaSeconds: 35,
-    creditCost: 3,
-    costUnits: 1,
+    etaBaseline: 35,
+    billing: { base: 3 },
+    billingNote: "按 3 张候选版式计费",
     icon: "layout",
     art: "/assets/tools/image-poster.jpg",
     outcome: "海报 PNG（真实字体排版，文字不会糊）",
@@ -284,9 +302,9 @@ export const TOOLS: ToolDef[] = [
     name: "音频合成",
     tagline: "配音、BGM 与音效自动对齐成一条声音轨道。",
     kind: "audio",
-    etaSeconds: 25,
-    creditCost: 1,
-    costUnits: 0.3,
+    etaBaseline: 25,
+    billing: { base: 0.3, perChars: { field: "script", charsPerUnit: 1000 } },
+    billingNote: "按文案字符数计费（每千字符一档）",
     icon: "wave",
     art: "/assets/tools/audio-tts.jpg",
     outcome: "WAV 音轨 + 波形 + 分段时间戳",
@@ -319,9 +337,9 @@ export const TOOLS: ToolDef[] = [
     name: "一键大片",
     tagline: "素材进来，节奏、转场、字幕、配乐一次成片。",
     kind: "video",
-    etaSeconds: 180,
-    creditCost: 6,
-    costUnits: 5,
+    etaBaseline: 180,
+    billing: { base: 15, scale: [{ field: "duration", map: { "15 秒": 1, "30 秒": 2, "60 秒": 4 } }] },
+    billingNote: "按所选成片时长计费",
     badge: "hot",
     icon: "film",
     art: "/assets/tools/video-movie.jpg",
@@ -341,9 +359,9 @@ export const TOOLS: ToolDef[] = [
     name: "超级混剪",
     tagline: "多套开头 × BGM × 字幕批量组合，一次出片。",
     kind: "video",
-    etaSeconds: 300,
-    creditCost: 9,
-    costUnits: 8,
+    etaBaseline: 300,
+    billing: { base: 50, ignored: ["count"] },
+    billingNote: "按 25 秒 × 2 款样片渲染计费；更多变体只改文案组合矩阵，不额外渲染",
     icon: "layers",
     art: "/assets/tools/video-mix.jpg",
     outcome: "N 个变体的分镜与关键帧，附组合矩阵",
@@ -364,9 +382,9 @@ export const TOOLS: ToolDef[] = [
     name: "门店引流",
     tagline: "给门店生成团购、到店与活动宣传视频。",
     kind: "video",
-    etaSeconds: 120,
-    creditCost: 6,
-    costUnits: 5,
+    etaBaseline: 120,
+    billing: { base: 30 },
+    billingNote: "按 30 秒成片计费",
     icon: "store",
     art: "/assets/tools/video-store.jpg",
     outcome: "门店视频分镜 / 口播稿 / 团购卡片画面",
@@ -389,9 +407,9 @@ export const TOOLS: ToolDef[] = [
     name: "口播数字人",
     tagline: "输入文案即可生成真人口播，无需出镜。",
     kind: "video",
-    etaSeconds: 90,
-    creditCost: 7,
-    costUnits: 6,
+    etaBaseline: 90,
+    billing: { base: 15, perChars: { field: "script", charsPerUnit: 5 } },
+    billingNote: "按口播时长计费（约 5 字 1 秒，最低 15 秒）",
     icon: "uservideo",
     art: "/assets/tools/avatar-talking.jpg",
     outcome: "口播分镜 / 逐句时间码 / 主播关键帧",
@@ -414,9 +432,9 @@ export const TOOLS: ToolDef[] = [
     name: "网感视频",
     tagline: "花字、贴纸、弹幕与热门音效，一次补齐平台氛围。",
     kind: "video",
-    etaSeconds: 120,
-    creditCost: 7,
-    costUnits: 6,
+    etaBaseline: 120,
+    billing: { base: 20 },
+    billingNote: "按 20 秒成片处理计费",
     badge: "new",
     icon: "sticker",
     art: "/assets/tools/avatar-net.jpg",
@@ -447,9 +465,9 @@ export const TOOLS: ToolDef[] = [
     name: "一键追爆",
     tagline: "发现正在上涨的话题，快速转成你的跟进内容。",
     kind: "copy",
-    etaSeconds: 30,
-    creditCost: 1,
-    costUnits: 5.5,
+    etaBaseline: 30,
+    billing: { base: 5.5, scale: [{ field: "count", map: { "3 条": 1, "5 条": 1.6, "10 条": 3 } }] },
+    billingNote: "按输出数量计费",
     icon: "flame",
     art: "/assets/tools/growth-trend.jpg",
     outcome: "跟进脚本 / 热度曲线 / 发布窗口建议",
@@ -467,9 +485,8 @@ export const TOOLS: ToolDef[] = [
     name: "视频反推",
     tagline: "从一条爆款视频，反推可复用的结构与分镜。",
     kind: "copy",
-    etaSeconds: 40,
-    creditCost: 2,
-    costUnits: 8.0,
+    etaBaseline: 40,
+    billing: { base: 8 },
     icon: "scan",
     art: "/assets/tools/growth-reverse.jpg",
     outcome: "分镜表 / 结构拆解 / 复刻建议",
@@ -493,9 +510,9 @@ export const TOOLS: ToolDef[] = [
     name: "网感封面",
     tagline: "从关键帧出发，生成高点击率的封面候选。",
     kind: "image",
-    etaSeconds: 40,
-    creditCost: 3,
-    costUnits: 1,
+    etaBaseline: 40,
+    billing: { base: 3, scale: [{ field: "count", map: { "3 张": 1, "6 张": 2, "9 张": 3 } }] },
+    billingNote: "按封面张数计费",
     icon: "frame",
     art: "/assets/tools/growth-cover.jpg",
     outcome: "封面候选 PNG（按尺寸出图，含文案安全区）",

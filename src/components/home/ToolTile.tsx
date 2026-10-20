@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { Icon } from "@/components/Icon";
 import type { ToolDef } from "@/lib/domain/tools";
+import { baseCredits } from "@/lib/domain/pricing";
+import type { ToolQuote } from "@/lib/client/api";
 
 const KIND_LABEL: Record<string, string> = {
   copy: "文案",
@@ -14,11 +16,26 @@ export function ToolTile({
   tool,
   runs,
   compact = false,
+  quote,
 }: {
   tool: ToolDef;
   runs?: number;
   compact?: boolean;
+  quote?: ToolQuote | null;
 }) {
+  // 积分与耗时都取服务端报价（= 实际扣费 / 实测中位数），拿不到才回落到本地基准
+  const credits = quote?.credits ?? baseCredits(tool);
+  const eta = quote?.etaSeconds ?? tool.etaBaseline;
+  const priceTitle = quote
+    ? `按 ${quote.units} ${unitLabel(tool)}计费 · ${quote.modelLabel}${
+        quote.maxCredits > quote.minCredits ? ` · 换模型 ${quote.minCredits}–${quote.maxCredits} 积分` : ""
+      }`
+    : "当前无可用模型，按本地引擎估算";
+  const etaTitle =
+    quote && quote.etaSource === "measured"
+      ? `近 ${quote.etaSamples} 次实测中位耗时`
+      : "暂无实测样本，按基线估算";
+
   return (
     <Link
       href={`/tools/${tool.slug}`}
@@ -54,9 +71,9 @@ export function ToolTile({
         >
           <span>{KIND_LABEL[tool.kind] ?? tool.kind}</span>
           <span style={{ opacity: 0.4 }}>/</span>
-          <span>{tool.etaSeconds}s</span>
+          <span title={etaTitle}>≈{eta}s</span>
           <span style={{ opacity: 0.4 }}>/</span>
-          <span>{tool.creditCost} 积分</span>
+          <span title={priceTitle}>{credits} 积分</span>
           {typeof runs === "number" && runs > 0 && (
             <>
               <span style={{ opacity: 0.4 }}>/</span>
@@ -75,4 +92,12 @@ export function ToolTile({
       </span>
     </Link>
   );
+}
+
+/** 计费单位的中文说法，用于 tooltip */
+function unitLabel(tool: ToolDef): string {
+  if (tool.kind === "image") return "张";
+  if (tool.kind === "video") return "秒";
+  if (tool.kind === "audio") return "千字符";
+  return "千 token";
 }

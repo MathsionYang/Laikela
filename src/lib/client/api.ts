@@ -46,14 +46,36 @@ export const apiPost = <T,>(url: string, body?: unknown) =>
 export const apiPatch = <T,>(url: string, body: unknown) =>
   request<T>(url, { method: "PATCH", body: JSON.stringify(body) });
 
+/**
+ * 服务端算好的工具报价。卡片、配置页、扣费三处共用这一个数字，
+ * 前端不再自己拼「基准价」。
+ */
+export interface ToolQuote {
+  credits: number;
+  units: number;
+  modelKey: string;
+  modelLabel: string;
+  unitPrice: number;
+  keySource: "platform" | "byok" | "local";
+  minCredits: number;
+  maxCredits: number;
+  etaSeconds: number;
+  etaSource: "measured" | "baseline";
+  etaSamples: number;
+}
+
 export interface ToolWithStats extends ToolDef {
   enabled: boolean;
   runs: number;
   lastRunAt: string | null;
+  /** null = 当前没有任何可用模型（只能走本地兜底价） */
+  quote: ToolQuote | null;
 }
 
 export interface ToolsPayload {
   sections: SectionDef[];
+  /** 当前租户套餐，用于前端按同一费率重算价格 */
+  planCode: string;
   tools: ToolWithStats[];
 }
 

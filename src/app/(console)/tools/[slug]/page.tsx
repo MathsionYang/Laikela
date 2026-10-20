@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { baseCredits } from "@/lib/domain/pricing";
 import { JobProgress } from "@/components/workbench/JobProgress";
 import { ResultView } from "@/components/workbench/ResultView";
 import { ToolForm } from "@/components/workbench/ToolForm";
@@ -97,6 +98,22 @@ export default function ToolPage() {
     );
   }
 
+  // 积分与耗时来自服务端报价（= 这一单真正会扣的分 / 实测中位耗时）
+  const quote = tool.quote;
+  const credits = quote?.credits ?? baseCredits(tool);
+  const eta = quote?.etaSeconds ?? tool.etaBaseline;
+  const priceTitle = quote
+    ? `按 ${quote.units} ${unitWord(tool.kind)}计费 · ${quote.modelLabel}${
+        quote.maxCredits > quote.minCredits
+          ? ` · 换模型区间 ${quote.minCredits}–${quote.maxCredits} 积分`
+          : ""
+      }`
+    : "当前无可用模型，按本地引擎估算";
+  const etaTitle =
+    quote && quote.etaSource === "measured"
+      ? `近 ${quote.etaSamples} 次实测中位耗时`
+      : "暂无实测样本，按基线估算";
+
   return (
     <div className="flex flex-col gap-4">
       {/* 头部 */}
@@ -123,8 +140,12 @@ export default function ToolPage() {
               <h1 className="serif text-[22px] leading-tight sm:text-[26px]">{tool.name}</h1>
               {tool.badge === "new" && <span className="chip chip-new">NEW</span>}
               {tool.badge === "hot" && <span className="chip chip-hot">HOT</span>}
-              <span className="chip">{tool.etaSeconds}s</span>
-              <span className="chip">{tool.creditCost} 积分</span>
+              <span className="chip" title={etaTitle}>
+                ≈{eta}s
+              </span>
+              <span className="chip" title={priceTitle}>
+                {credits} 积分
+              </span>
             </div>
             <p className="mt-1 text-[12.5px]" style={{ color: "var(--t2)" }}>
               {tool.tagline}
@@ -238,14 +259,32 @@ export default function ToolPage() {
                 <span>类型</span>
                 <span className="mono" style={{ color: "var(--t2)" }}>{tool.kind}</span>
               </span>
-              <span className="flex justify-between">
+              <span className="flex justify-between gap-2">
                 <span>预计耗时</span>
-                <span className="mono" style={{ color: "var(--t2)" }}>{tool.etaSeconds}s</span>
+                <span className="mono text-right" style={{ color: "var(--t2)" }}>
+                  ≈{eta}s
+                  <span className="ml-1" style={{ color: "var(--t3)" }}>
+                    {quote?.etaSource === "measured" ? `实测 ${quote.etaSamples} 次` : "基线"}
+                  </span>
+                </span>
               </span>
-              <span className="flex justify-between">
+              <span className="flex justify-between gap-2">
                 <span>积分</span>
-                <span className="mono" style={{ color: "var(--t2)" }}>{tool.creditCost}</span>
+                <span className="mono text-right" style={{ color: "var(--t2)" }}>
+                  {credits}
+                  <span className="ml-1" style={{ color: "var(--t3)" }}>
+                    {quote ? quote.modelLabel : "本地引擎"}
+                  </span>
+                </span>
               </span>
+              {tool.billingNote && (
+                <span className="flex justify-between gap-2">
+                  <span>计费方式</span>
+                  <span className="text-right" style={{ color: "var(--t2)" }}>
+                    {tool.billingNote}
+                  </span>
+                </span>
+              )}
             </div>
           </section>
 
@@ -321,4 +360,12 @@ function EmptyState({ outcome }: { outcome: string }) {
       </div>
     </div>
   );
+}
+
+/** 计费单位的中文说法，与 lib/domain/pricing.ts 的计费量口径对应 */
+function unitWord(kind: string): string {
+  if (kind === "image") return "张";
+  if (kind === "video") return "秒";
+  if (kind === "audio") return "千字符";
+  return "千 token";
 }

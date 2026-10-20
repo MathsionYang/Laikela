@@ -5,11 +5,12 @@ import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import type { ToolDef, ToolField } from "@/lib/domain/tools";
 import { defaultInput } from "@/lib/domain/tools";
-import { quoteCost } from "@/lib/domain/pricing";
-import { uploadAssets, useModels, type ClientAsset, type ModelPayload } from "@/lib/client/api";
+import { baseCredits, LOCAL_ETA_FACTOR, quoteCost, unitsOf } from "@/lib/domain/pricing";
+import { uploadAssets, useModels, type ClientAsset, type ModelPayload, type ToolQuote } from "@/lib/client/api";
 
 interface Props {
-  tool: ToolDef;
+  /** 带服务端报价的工具定义：报价决定「自动路由」时的价格，不能省 */
+  tool: ToolDef & { quote?: ToolQuote | null };
   busy: boolean;
   onSubmit: (values: Record<string, unknown>, modelKey: string | null) => void;
 }
@@ -20,6 +21,14 @@ const MODEL_KIND: Record<string, ModelPayload["kind"]> = {
   image: "image",
   video: "video",
   audio: "audio",
+};
+
+/** 计费单位的中文说法，跟 pricing.ts 的计费量口径一一对应 */
+const UNIT_LABEL: Record<string, string> = {
+  copy: "千 token",
+  image: "张",
+  video: "秒",
+  audio: "千字符",
 };
 
 export function ToolForm({ tool, busy, onSubmit }: Props) {
@@ -36,10 +45,29 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
   );
 
   const selected = options.find((m) => m.key === modelKey) ?? null;
-  // 与服务端同一份计价函数：平台代付 = 成本×(1+套餐费率)，自带 Key = 只收服务费
+
+  /**
+   * 价格与服务端同源：
+   *   · 选了模型 → 按该模型单价
+   *   · 自动路由 → 按服务端报价里那个「真正会被选中的模型」的单价
+   * 两者都用 unitsOf(input) 换算，所以改张数 / 时长 / 篇幅时这里会实时变，
+   * 且与服务端扣费一分不差。
+   */
+  const planCode = modelData?.planCode;
+  const auto = tool.quote;
   const cost = selected
-    ? quoteCost(tool, selected.unitPrice, selected.keySource, modelData?.planCode)
-    : (tool.creditCost ?? 1);
+    ? quoteCost(tool, selected.unitPrice, selected.keySource, planCode, values)
+    : auto
+      ? quoteCost(tool, auto.unitPrice, auto.keySource === "byok" ? "byok" : "platform", planCode, values)
+      : baseCredits(tool);
+  const units = unitsOf(tool, values);
+  // 耗时也要跟着模型走：本地引擎 ≈ 基线 × 0.7，云端 = 基线；
+  // 自动路由时直接用服务端的实测值
+  const eta = !selected || selected.key === auto?.modelKey
+    ? (auto?.etaSeconds ?? tool.etaBaseline)
+    : selected.provider === "local"
+      ? Math.max(1, Math.round(tool.etaBaseline * LOCAL_ETA_FACTOR))
+      : tool.etaBaseline;
 
   const set = (id: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [id]: v }));
@@ -121,8 +149,13 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
 
         <div className="flex items-center justify-between gap-3">
           <span className="mono text-[10.5px]" style={{ color: "var(--t3)" }}>
-            {tool.etaSeconds} 秒 · 消耗 {cost} 积分
+            ≈{eta} 秒 · 消耗 {cost} 积分
             {selected?.keySource === "byok" ? "（平台服务费）" : ""}
+            <span className="ml-1" style={{ opacity: 0.75 }}>
+              · {units} {UNIT_LABEL[tool.kind]}
+              {" · "}
+              {selected?.label ?? auto?.modelLabel ?? "本地引擎"}
+            </span>
           </span>
           <button type="submit" className="btn btn-primary" disabled={busy}>
             <Icon name="spark" size={14} />
@@ -130,7 +163,8 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
           </button>
         </div>
         <p className="text-[10px] leading-relaxed" style={{ color: "var(--t3)" }}>
-          提交后会创建一条任务，结果自动归档到素材库。生成内容仍需人工核对价格、时间与资质表述。
+          {tool.billingNote ? `${tool.billingNote}。` : ""}提交后会创建一条任务，结果自动归档到素材库。
+          生成内容仍需人工核对价格、时间与资质表述。
         </p>
       </div>
     </form>

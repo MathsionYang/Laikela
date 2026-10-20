@@ -2,95 +2,19 @@ import { newId, q, q1 } from "./index";
 import { DEMO_ORG_ID, DEMO_USER_ID, env } from "@/lib/env";
 import { hashPassword } from "@/lib/password";
 import { TOOLS } from "@/lib/domain/tools";
+import { PLAN_CATALOG } from "@/lib/domain/plans";
+import { BASELINE_UNIT_PRICE, baseCredits, unitsOf } from "@/lib/domain/pricing";
 import { PROMPTS, PROMPT_VERSION } from "@/lib/domain/prompts";
 import { TEMPLATE_SPECS } from "@/lib/domain/templates";
 
 /** 演示账号：owner@laikela.local / laikela2026 */
 const DEMO_PASSWORD = "laikela2026";
 
-/** 套餐目录：订阅决定每月发多少积分，积分决定一次任务扣多少 */
 /**
- * 套餐目录。
- *
- * 额度不是拍脑袋定的，是从「正收益」反推出来的：
- *   额度上限 = (月费 × (1 - 目标净利率) - 固定成本) ÷ 最坏每积分成本
- * 其中固定成本 ¥19.2/月/租户（服务器 + DB + 存储 + CDN + 获客摊销），
- * 最坏每积分成本 0.957 分（额度全部用在 Seedance / Seedream 这类贵模型上），
- * 目标净利率 20%。推导过程见 docs/PRICING.md 第 5 节。
- *
- * 套餐之间拉开的不是「积分折扣」（那会变成价格战），而是：
- *   · 服务费率 5% → 4.5% → 4% → 3%（量大费率低，B 端惯例）
- *   · 席位与协作能力
- *   · 并发队列、OpenAPI、私有化、SLA
- *
- * 换句话说：token 按成本价转售，利润来自席位与功能，不来自加价。
+ * 套餐目录（定义在 lib/domain/plans.ts）：
+ * 订阅决定每月发多少积分，积分决定一次任务扣多少。
  */
-const DEMO_PLANS = [
-  {
-    code: "free",
-    name: "体验版",
-    tagline: "15 项能力全部开放，先把一条链路跑通",
-    price: 0,
-    credits: 200,
-    seats: 1,
-    sort: 0,
-    features: [
-      "15 项能力全部开放",
-      "本地引擎 + 200 积分体验额度",
-      "约 200 次文案 / 60 张海报",
-      "素材保留 7 天",
-      "单个任务最多 3 个变体",
-    ],
-  },
-  {
-    code: "creator",
-    name: "创作版",
-    tagline: "用多少扣多少，模型按官方成本价结算",
-    price: 99,
-    credits: 6000,
-    seats: 1,
-    sort: 1,
-    features: [
-      "6,000 积分（约 6,000 次文案 / 1,800 张图）",
-      "云端模型：DeepSeek V4 / 豆包 Seed 2.1",
-      "额度按固定成本反推，用满也不亏",
-      "商用授权 · 素材保留 90 天",
-      "批量变体与 A/B 文案",
-    ],
-  },
-  {
-    code: "studio",
-    name: "工作室",
-    tagline: "5 人共用一份额度，费率降到 4%",
-    price: 299,
-    credits: 22000,
-    seats: 5,
-    sort: 2,
-    features: [
-      "22,000 积分池 · 服务费 4%",
-      "5 个席位，额度池共享",
-      "品牌人设与口吻库 · 团队素材库",
-      "OpenAPI 访问 · 优先队列（并发 4）",
-      "用量分成员统计与预警",
-    ],
-  },
-  {
-    code: "enterprise",
-    name: "企业版",
-    tagline: "最低 3% 费率，席位与合规一起给",
-    price: 1200,
-    credits: 95000,
-    seats: 30,
-    sort: 3,
-    features: [
-      "95,000 积分池 · 服务费 3%（最低档）",
-      "30 个席位 · 私有化部署可选",
-      "专属模型通道与私有知识库",
-      "SSO、权限分级、审计日志导出",
-      "SLA 99.9% · 对公发票 · 专属对接人",
-    ],
-  },
-];
+const DEMO_PLANS = PLAN_CATALOG;
 
 /** 幂等种子：只在首次（或显式 --force）时写入演示数据 */
 export async function seedAll(force = false) {
@@ -218,6 +142,10 @@ export async function seedAll(force = false) {
         ]),
       );
       const jobId = newId("job");
+      // 演示历史也按真实计费口径写：units 由 billing 规则换算，cost 用本地引擎影子单价
+      const units = unitsOf(tool, input);
+      const costCny = units * BASELINE_UNIT_PRICE[tool.kind];
+      const credits = baseCredits(tool);
       await q(
         `insert into jobs
           (id, org_id, tool_slug, status, stage, progress, input, output,
@@ -226,7 +154,7 @@ export async function seedAll(force = false) {
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
                  now() - ($14 || ' hours')::interval,
                  now() - ($14 || ' hours')::interval + interval '2 seconds',
-                 now() - ($14 || ' hours')::interval + interval '${tool.etaSeconds} seconds',
+                 now() - ($14 || ' hours')::interval + interval '${Math.round(tool.etaBaseline * 0.85)} seconds',
                  $15,$16)`,
         [
           jobId,
@@ -241,7 +169,7 @@ export async function seedAll(force = false) {
           env.hasCloudProvider ? env.providers.deepseek.model : "local-sim",
           PROMPT_VERSION,
           1,
-          (tool.creditCost * 0.18).toFixed(2),
+          costCny.toFixed(4),
           String(hoursAgo),
           status === "failed" ? "PROVIDER_TIMEOUT" : null,
           status === "failed" ? "供应商在 30 秒内未返回结果，已自动重试 1 次" : null,
@@ -260,9 +188,9 @@ export async function seedAll(force = false) {
             env.hasCloudProvider ? "deepseek" : "local",
             env.hasCloudProvider ? env.providers.deepseek.model : "local-sim",
             tool.kind === "copy" ? "k_token" : tool.kind === "image" ? "image" : tool.kind === "audio" ? "minute" : "video_second",
-            tool.creditCost,
-            0.018,
-            (tool.creditCost * 0.18).toFixed(4),
+            units,
+            BASELINE_UNIT_PRICE[tool.kind],
+            costCny.toFixed(4),
             String(hoursAgo),
           ],
         );
@@ -422,8 +350,8 @@ async function seedAccountAndPlans() {
         tool.name,
         tool.tagline,
         tool.kind,
-        tool.etaSeconds,
-        tool.creditCost,
+        tool.etaBaseline,
+        baseCredits(tool),
         tool.badge ?? null,
         i,
       ],

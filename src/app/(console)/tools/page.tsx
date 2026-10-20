@@ -85,7 +85,7 @@ function ToolsBrowser() {
             </div>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {tools.map((t) => (
-                <ToolTile key={t.slug} tool={t} runs={t.runs} />
+                <ToolTile key={t.slug} tool={t} runs={t.runs} quote={t.quote} />
               ))}
             </div>
           </section>

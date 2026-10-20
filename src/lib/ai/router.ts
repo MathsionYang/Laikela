@@ -21,6 +21,7 @@ import {
 import { baseUrlOf, markError, markUsed, resolveKey, type ProviderId } from "./credentials";
 import { chatCompletion } from "./adapters";
 import { quoteCost as priceOf, SERVICE_RATE } from "@/lib/domain/pricing";
+import type { BillingRule, ToolKind } from "@/lib/domain/tools";
 import {
   customSpecs,
   endpointIdOf,
@@ -127,13 +128,16 @@ export function creditsFor(spec: ModelSpec, keySource: "byok" | "platform"): num
 /**
  * 本次任务实际扣多少积分。计价口径统一在 `lib/domain/pricing.ts`，
  * 前端预览与服务端扣费共用同一份实现，避免两边算出不同的数。
+ *
+ * 传 input 后按实际张数 / 秒数 / 字数计费；不传则按默认输入（卡片展示用）。
  */
 export function quoteCost(
-  tool: { creditCost?: number; costUnits?: number },
+  tool: { kind: ToolKind; billing: BillingRule },
   r: ResolvedModel,
   planCode?: string | null,
+  input?: Record<string, unknown> | null,
 ): number {
-  return priceOf(tool, r.spec.unitPrice ?? 0, r.keySource, planCode);
+  return priceOf(tool, r.spec.unitPrice ?? 0, r.keySource, planCode, input);
 }
 
 /**
@@ -146,8 +150,10 @@ export async function resolveModel(params: {
   planCode: string | null;
   preferredKey?: string | null;
   capability?: string;
+  /** 已经查过目录视图时传进来，避免一个请求里重复打库（工具报价会按 kind 各调一次） */
+  views?: ModelView[];
 }): Promise<ResolvedModel> {
-  const views = await listModelViews(params.orgId, params.planCode);
+  const views = params.views ?? (await listModelViews(params.orgId, params.planCode));
   const usable = views.filter((v) => v.kind === params.kind && v.usable);
 
   const build = async (v: ModelView): Promise<ResolvedModel | null> => {
@@ -193,7 +199,12 @@ export async function resolveModel(params: {
   }
 
   // 2) 能力匹配优先，再按目录优先级（成本/质量已人工排序）
-  const ranked = [...usable].sort((a, b) => {
+  //
+  // byokOnly 的模型（Seedance 这类按秒计费、一条几十块的）**不参与自动路由**：
+  // 它存在的意义就是「平台不代付，避免误点烧钱」，自动选中它等于把这个保险拆了。
+  // 用户明确选它（preferredKey）时才走上面第 1 步。
+  const autoPool = usable.filter((v) => !v.byokOnly);
+  const ranked = [...(autoPool.length > 0 ? autoPool : usable)].sort((a, b) => {
     const capA = params.capability && a.capabilities.includes(params.capability) ? 0 : 1;
     const capB = params.capability && b.capabilities.includes(params.capability) ? 0 : 1;
     if (capA !== capB) return capA - capB;

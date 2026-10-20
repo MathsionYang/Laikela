@@ -15,7 +15,8 @@
     "doctor": "tsx scripts/doctor.ts",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "infra:logs": "docker compose logs -f --tail=40"
+    "infra:logs": "docker compose logs -f --tail=40",
+    "check:margin": "tsx scripts/check-margin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

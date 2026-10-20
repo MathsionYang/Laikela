@@ -88,7 +88,9 @@ export async function POST(req: NextRequest) {
     preferredKey: body.modelKey ?? undefined,
     capability: tool.kind === "copy" ? "copy" : undefined,
   });
-  const cost = quoteCost(tool, model, planCode);
+  // 按实际输入计费：出 4 张就扣 4 张、出 60 秒就扣 60 秒、文案越长扣越多。
+  // 卡片上展示的「默认输入价」也是同一函数算的，用户改选项时前端会实时重算。
+  const cost = quoteCost(tool, model, planCode, input);
 
   const before = await balance(session.orgId);
   if (before < cost) {

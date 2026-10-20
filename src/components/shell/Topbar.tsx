@@ -233,7 +233,7 @@ function CommandPalette({
                   </span>
                 </span>
                 <span className="mono shrink-0 text-[10px]" style={{ color: "var(--t3)" }}>
-                  {t.etaSeconds}s
+                  ≈{t.quote?.etaSeconds ?? t.etaBaseline}s
                 </span>
               </button>
             ))}

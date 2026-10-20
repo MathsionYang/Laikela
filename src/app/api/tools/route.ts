@@ -2,6 +2,8 @@ import { ok } from "@/lib/api";
 import { ensureDb, q } from "@/lib/db";
 import { requireSession } from "@/lib/session-api";
 import { SECTIONS, TOOLS } from "@/lib/domain/tools";
+import { planCodeOf } from "@/lib/billing";
+import { toolQuotes } from "@/lib/ai/tool-quotes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,13 +28,20 @@ export async function GET() {
   );
   const enabledMap = new Map(enabled.map((r) => [r.slug, r.enabled]));
 
+  // 报价：这一单会选中哪个模型、扣多少积分、大概跑多久 —— 全按当前租户的真实情况算，
+  // 卡片上的数字不再是手写常量（与 /api/jobs 的扣费同源）
+  const planCode = await planCodeOf(session.orgId);
+  const quotes = await toolQuotes(session.orgId, planCode);
+
   return ok({
     sections: SECTIONS,
+    planCode,
     tools: TOOLS.map((t) => ({
       ...t,
       enabled: enabledMap.get(t.slug) !== false,
       runs: Number(byTool.get(t.slug)?.runs ?? 0),
       lastRunAt: byTool.get(t.slug)?.last_at ?? null,
+      quote: quotes[t.slug] ?? null,
     })),
   });
 }
