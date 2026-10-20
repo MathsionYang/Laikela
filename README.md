@@ -1,6 +1,4 @@
-<a href="https://github.com/MathsionYang/Laikela">
-<img src="docs/banner.svg" alt="来客啦 · AI 内容营销专家" width="100%">
-</a>
+[![来客啦 · AI 内容营销专家](docs/banner.svg)](https://github.com/MathsionYang/Laikela)
 
 ### Content as Workflow ｜ 15 项 AI 内容能力，一条任务链路，从输入到积分结算
 
@@ -13,7 +11,7 @@
 ![Tools](https://img.shields.io/badge/Abilities-15-D8A85E?labelColor=0D0F12)
 ![Version](https://img.shields.io/badge/Version-v0.1.0-1D9E75?labelColor=0D0F12)
 
-[**快速开始**](#quick-start) · [**能力总览**](#abilities) · [**核心设计**](#design) · [**积分账本**](#credits) · [**模型接入**](#models) · [**接口清单**](#api) · [**已知边界**](#limits)
+[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界)
 
 ---
 
@@ -30,8 +28,6 @@
 技术栈对齐 `神秘力量_AI内容营销专家_功能复刻分析.md`，UI 视觉基准为 `../prototype-v2.html`（墨金编辑风：衬线标题 + 等宽编号 + 单一金色强调）。
 
 ---
-
-<a name="quick-start"></a>
 
 ## 🚀 三分钟跑起来
 
@@ -73,9 +69,7 @@ npm run build && npm start
 
 ---
 
-<a name="abilities"></a>
-
-## 🗂️ 15 项能力总览
+## 📦 15 项能力总览
 
 积分与耗时来自 `src/lib/domain/tools.ts` 的真实定义，不是占位数字。
 
@@ -123,8 +117,6 @@ npm run build && npm start
 
 ---
 
-<a name="design"></a>
-
 ## 🧠 核心设计
 
 ### 任务状态机
@@ -138,8 +130,6 @@ queued → running → post_processing → reviewing → succeeded
 - 进度双通道：SSE（`/api/jobs/[id]/events`）推实时阶段 + 轮询兜底。SSE 断了页面不会永久卡住。
 - 任务创建时就把选定的 `model_key` 落到 `jobs` 表，执行时再校验一次套餐（可能中途到期）。
 - Worker 双实现：BullMQ（Redis）/ 进程内队列（降级），同一套 `pipeline.ts` 消费。
-
-<a name="credits"></a>
 
 ### 积分账本
 
@@ -170,8 +160,6 @@ queued → running → post_processing → reviewing → succeeded
 - 取消续订 = `cancel_at_period_end`，当期不退款、到期不扣费；可恢复。
 
 ---
-
-<a name="models"></a>
 
 ## 🔐 模型接入：三条路径
 
@@ -277,8 +265,6 @@ worker/index.ts               BullMQ 消费者入口
 
 ---
 
-<a name="api"></a>
-
 ## 🔌 接口清单
 
 | 方法 | 路径 | 说明 |
@@ -301,8 +287,6 @@ worker/index.ts               BullMQ 消费者入口
 `/api/jobs` 的错误码：`INSUFFICIENT_CREDITS`(402) / `INVALID_INPUT`(422) / `NO_TOOL`(404) / `UNAUTHORIZED`(401)。
 
 ---
-
-<a name="limits"></a>
 
 ## 📄 已知边界
 
