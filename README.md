@@ -1,4 +1,6 @@
-<a href="https://github.com/MathsionYang/Laikela"><img src="docs/banner.svg" alt="来客啦 · AI 内容营销专家" width="100%"></a>
+<a href="https://github.com/MathsionYang/Laikela">
+<img src="docs/banner.svg" alt="来客啦 · AI 内容营销专家" width="100%">
+</a>
 
 ### Content as Workflow ｜ 15 项 AI 内容能力，一条任务链路，从输入到积分结算
 
@@ -29,7 +31,7 @@
 
 ---
 
-<a id="quick-start"></a>
+<a name="quick-start"></a>
 
 ## 🚀 三分钟跑起来
 
@@ -71,7 +73,7 @@ npm run build && npm start
 
 ---
 
-<a id="abilities"></a>
+<a name="abilities"></a>
 
 ## 🗂️ 15 项能力总览
 
@@ -121,7 +123,7 @@ npm run build && npm start
 
 ---
 
-<a id="design"></a>
+<a name="design"></a>
 
 ## 🧠 核心设计
 
@@ -137,7 +139,7 @@ queued → running → post_processing → reviewing → succeeded
 - 任务创建时就把选定的 `model_key` 落到 `jobs` 表，执行时再校验一次套餐（可能中途到期）。
 - Worker 双实现：BullMQ（Redis）/ 进程内队列（降级），同一套 `pipeline.ts` 消费。
 
-<a id="credits"></a>
+<a name="credits"></a>
 
 ### 积分账本
 
@@ -169,7 +171,7 @@ queued → running → post_processing → reviewing → succeeded
 
 ---
 
-<a id="models"></a>
+<a name="models"></a>
 
 ## 🔐 模型接入：三条路径
 
@@ -275,7 +277,7 @@ worker/index.ts               BullMQ 消费者入口
 
 ---
 
-<a id="api"></a>
+<a name="api"></a>
 
 ## 🔌 接口清单
 
@@ -300,7 +302,7 @@ worker/index.ts               BullMQ 消费者入口
 
 ---
 
-<a id="limits"></a>
+<a name="limits"></a>
 
 ## 📄 已知边界
 
