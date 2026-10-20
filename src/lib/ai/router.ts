@@ -35,6 +35,8 @@ export interface ModelView extends ModelSpec {
   enabled: boolean;
   available: boolean;
   keySource: "byok" | "platform" | "none";
+  /** 这把 Key 上次调用是否失败：失败的不禁用，但自动路由会把它排到最后 */
+  keyHealthy: boolean;
   allowedByPlan: boolean;
   usable: boolean;
   /** 目录排序权重，越小越优先（运维可在库里调整） */
@@ -64,7 +66,10 @@ export async function listModelViews(
   planCode: string | null,
 ): Promise<ModelView[]> {
   const meta = await metaMap();
-  const providerKeys = new Map<ProviderId, { apiKey: string; source: "byok" | "platform" | "none" }>();
+  const providerKeys = new Map<
+    ProviderId,
+    { apiKey: string; source: "byok" | "platform" | "none"; healthy: boolean }
+  >();
   for (const p of ["deepseek", "doubao"] as ProviderId[]) {
     providerKeys.set(p, await resolveKey(orgId, p));
   }
@@ -73,9 +78,9 @@ export async function listModelViews(
     const m = meta.get(spec.key);
     const isLocal = spec.provider === "local";
     const cred = isLocal
-      ? { apiKey: "local", source: "platform" as const }
+      ? { apiKey: "local", source: "platform" as const, healthy: true }
       : (providerKeys.get(spec.provider as ProviderId) ??
-        { apiKey: "", source: "none" as const });
+        { apiKey: "", source: "none" as const, healthy: false });
     const available = Boolean(cred.apiKey);
     const allowedByPlan = planAllows(spec, planCode);
     const byokReady = cred.source === "byok";
@@ -89,6 +94,7 @@ export async function listModelViews(
     if (!on) reason = "已被管理员关闭";
     else if (!available) reason = "未配置 API Key";
     else if (!planOk) reason = `需要「${spec.requiresPlan}」及以上套餐，或自带 Key`;
+    else if (!cred.healthy) reason = "上次调用鉴权失败，可继续使用但不参与自动路由";
 
     return {
       ...spec,
@@ -97,6 +103,7 @@ export async function listModelViews(
       enabled: on,
       available,
       keySource: cred.source,
+      keyHealthy: cred.healthy,
       allowedByPlan: planOk,
       usable,
       priority: m?.priority ?? index,
@@ -111,6 +118,7 @@ export async function listModelViews(
     enabled: spec.enabled,
     available: true,
     keySource: "byok" as const,
+    keyHealthy: true,
     allowedByPlan: true,
     usable: spec.enabled,
     priority: 100 + i,
@@ -208,6 +216,9 @@ export async function resolveModel(params: {
     const capA = params.capability && a.capabilities.includes(params.capability) ? 0 : 1;
     const capB = params.capability && b.capabilities.includes(params.capability) ? 0 : 1;
     if (capA !== capB) return capA - capB;
+    // 上次鉴权失败的 Key 排到「本地引擎」后面：
+    // 与其把用户送到一个刚证明失败的接口上再回落，不如一开始就走能跑通的路径。
+    if (a.keyHealthy !== b.keyHealthy) return a.keyHealthy ? -1 : 1;
     const localA = a.provider === "local" ? 1 : 0;
     const localB = b.provider === "local" ? 1 : 0;
     if (localA !== localB) return localA - localB; // 本地永远最后

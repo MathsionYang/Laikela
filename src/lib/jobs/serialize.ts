@@ -42,7 +42,7 @@ export function clientJob(j: JobRow): ClientJob {
   };
 }
 
-export function clientAsset(a: AssetRow) {
+export function clientAsset(a: AssetRow, thumbUrl?: string | null) {
   return {
     id: a.id,
     kind: a.kind,
@@ -54,6 +54,13 @@ export function clientAsset(a: AssetRow) {
     height: a.height,
     durationMs: a.duration_ms,
     url: assetUrl(a),
+    /** 列表用小图（有缩略图就是 webp，没有就回落到原图） */
+    thumbUrl: thumbUrl ?? null,
+    /** 带 Content-Disposition 的下载口，文件名取素材名而不是存储 key */
+    downloadUrl: `/api/assets/${a.id}/download`,
+    jobId: a.job_id,
+    /** 文字类素材的正文摘要，列表直接显示，不用再请求一次 */
+    preview: typeof a.meta?.preview === "string" ? a.meta.preview : null,
     meta: a.meta,
     createdAt: a.created_at,
   };

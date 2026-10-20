@@ -187,7 +187,34 @@ token 层：价格 = 模型官方成本 × 计费量 × (1 + 套餐服务费率)
 
 ---
 
-## 🧾 账号、额度与充值
+## 🗂 素材：保存、预览、下载、删除
+
+任务产出的四类内容全部落盘，素材库是它们唯一的入口 —— 不是「生成完就散在任务详情里」。
+
+| 产出 | 落盘文件 | 计费单位 | 素材形态 |
+| --- | --- | --- | --- |
+| 文案 | `final.md`（标题 + 正文，utf-8） | 千 token | 卡片显示正文摘要，点开看全文 |
+| 图片 | `final-1..n.png` + `thumb-1..n.webp` | 张 | 缩略图 240px，点开看原图 |
+| 音频 | `mix.wav` / `mix.mp3` | 千字符 | 原生播放器 |
+| 视频 | `final.mp4`（云端）/ `shot-*.png` + `timeline.json`（本地分镜） | 秒 | 原生播放器 / 分镜关键帧 |
+
+- **存储位置**：默认 `./data/storage/{orgId}/jobs/{jobId}/…`（`STORAGE_DRIVER=local`，零额外依赖）；改成 `s3` 后同一套 key 结构进桶，代码不用动。
+- **下载走 `/api/assets/[id]/download`**，不是签名 URL。签名 URL 里只有存储 key（`final-1.png`），落地文件名会变成这串机器名；这个口子会带上素材名并做 RFC 5987 编码，中文文件名不乱码。
+- **删除是真删**：先删存储文件（含缩略图、`asset_versions` 里的历史版本），再删数据库行。只删行不删文件，本地目录会越攒越大且再也无法回收。
+- **编辑同步**：在文案编辑器里改完保存，素材库那份 `.md` 会一起更新 —— 否则用户下载到的是第一次生成的旧稿。
+- **缩略图单独一行**：`role='thumbnail'` 的素材不占列表位置，只作为图片/视频的 `thumbUrl`；素材多的账号不会因为拖 1080px 原图而吃掉几百 MB 流量。
+
+### 计费与素材是同一条链路
+
+卡片上的「x 积分 / y 秒」不是手写常量：`/api/tools` 用**和下单同一套** `resolveModel + quoteCost` 现算，耗时取近 90 天成功任务的实测中位数（本地/云端分桶，剔除演示与降级样本）。
+
+两个容易出错的点已经修掉：
+
+- **失效 Key 不再被自动选中。** 上次调用 401 的 Key 依然可用（不做永久封禁），但自动路由会把它排到本地引擎后面 —— 否则卡片写着「豆包 · 20 秒」，跑起来却掉回本地，报价和实际执行是两张皮。
+- **降级按实际引擎重新结账。** 云端失败回落本地后，`output.billing` 记录 `charged / actual / refunded`，多收的积分自动退回（只退不补：事后加价等于暗改价格）。`npm run check:margin` 会按真实计价代码逐格验算成本与毛利。
+
+---
+
 
 ### 注册必须先过邮箱验证
 
@@ -362,7 +389,10 @@ worker/index.ts               BullMQ 消费者入口
 | POST | `/api/admin/users/[id]/plan` | 手动改套餐 `{planCode, months, bonusCredits?}` |
 | GET | `/api/admin/payments` | 转账申报列表（`status=pending/approved/rejected/all`） |
 | POST | `/api/admin/payments/[id]/review` | 审核 `{action: approve\|reject, ...}` |
-| GET | `/api/assets` · `/dashboard` · `/usage` | 素材 / 总览 / 用量 |
+| GET | `/api/assets` | 素材列表（按 `kind` 过滤，带缩略图与下载地址） |
+| GET | `/api/assets/[id]/download` | 下载（`Content-Disposition attachment`，文件名取素材名）；`?inline=1` 内联预览 |
+| DELETE | `/api/assets/[id]` | 删除素材：存储文件 + 缩略图 + 版本 + 数据库行一起清 |
+| GET | `/api/dashboard` · `/api/usage` | 总览 / 用量 |
 | GET | `/api/health` | 数据库与队列驱动、连通性 |
 
 `/api/jobs` 的错误码：`INSUFFICIENT_CREDITS`(402) / `INVALID_INPUT`(422) / `NO_TOOL`(404) / `UNAUTHORIZED`(401)。
@@ -380,8 +410,9 @@ worker/index.ts               BullMQ 消费者入口
 - **没有找回密码。** 注册有邮箱验证（验证码 + 冷却 + 次数上限），但「忘记密码」还没做，目前只能由管理员在库里重置。补这条链路时可以直接复用 `email_verifications` 表（`purpose='reset'` 字段已留位）。
 - **无成员邀请与角色管理 UI。** `owner` / `admin` / `member` 角色枚举已存在，只有 owner 能改模型凭证。
 - **`next dev` 下 React hydration 有 HMR 握手问题**（Turbopack websocket），`next start` 正常，不影响交付。
-- **降级不重新计价。** 云端模型调用失败会自动回落本地引擎并标 `output.degraded`，但**已扣的积分不会退**（按所选模型的价格收）。当前靠「失败即退款」覆盖彻底失败，降级这种「成功但降质」还没做差额退款 —— 补的办法是在 pipeline 收尾时按实际产出重算一次并写一条 `adjust` 流水。
+- **降级重算只退不补。** 云端失败回落本地后，按实际执行的引擎重算并退回差额（`output.billing` 有明细）。如果反过来算出来更贵（比如 BYOK 服务费低于本地引擎成本），不会事后加价 —— 差额由平台吸收。
 - **计费量里仍有估算成分。** `billing.base` 的取值是按表单档位与流水线实际产出对齐的，但文本类 token 数还是估的；上线两周后应按 `usage_records` 的 P90 回填，再跑 `npm run check:margin`。
+- **素材没有回收站。** `DELETE /api/assets/[id]` 是硬删除（文件 + 记录），删掉不可恢复；删除写 `audit_logs` 留痕，但不保留副本。需要「误删恢复」的话，得加 `deleted_at` 软删与到期清理。
 - **无单元测试与 CI。** 验证方式是端到端探针脚本，未沉淀成测试用例。
 
 ---

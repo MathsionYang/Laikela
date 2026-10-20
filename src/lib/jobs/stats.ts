@@ -28,6 +28,13 @@ export interface ToolRunStat {
 /** 少于这个样本数就不采信实测值，回落到基线 */
 export const MIN_SAMPLES = 3;
 
+/**
+ * 本地引擎的采信门槛低一档。
+ * 它不跑网络、排队、出图，方差极小（同一个工具基本都在同一个几百毫秒量级），
+ * 两次样本就足以说明「这条链路有多快」；云端受网络与厂商排队影响，仍要三次。
+ */
+export const MIN_SAMPLES_LOCAL = 2;
+
 export async function toolRunStats(): Promise<Map<string, ToolRunStat>> {
   const rows = await q<{
     tool_slug: string;
@@ -86,7 +93,8 @@ export function pickEta(
   baseline: number,
 ): { seconds: number; source: "measured" | "baseline"; samples: number } {
   const bucket = isLocal ? stat?.local : stat?.remote;
-  if (bucket && bucket.n >= MIN_SAMPLES && bucket.p50 > 0) {
+  const minSamples = isLocal ? MIN_SAMPLES_LOCAL : MIN_SAMPLES;
+  if (bucket && bucket.n >= minSamples && bucket.p50 > 0) {
     return { seconds: Math.max(1, Math.round(bucket.p50)), source: "measured", samples: bucket.n };
   }
   const fallback = isLocal ? Math.max(1, Math.round(baseline * LOCAL_ETA_FACTOR)) : baseline;

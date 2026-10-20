@@ -108,6 +108,13 @@ export interface ClientAsset {
   height: number | null;
   durationMs: number | null;
   url: string;
+  /** 列表缩略图（webp）；没有就是 null，回落到 url */
+  thumbUrl: string | null;
+  /** 带文件名与 Content-Disposition 的下载地址 */
+  downloadUrl: string;
+  jobId: string | null;
+  /** 文字素材的正文摘要 */
+  preview: string | null;
   meta: Record<string, unknown>;
   createdAt: string;
 }
@@ -223,8 +230,24 @@ export async function uploadAssets(files: File[]): Promise<ClientAsset[]> {
 export const useAssets = (kind?: string) =>
   useQuery({
     queryKey: ["assets", kind ?? "all"],
-    queryFn: () => apiGet<ClientAsset[]>(`/api/assets?limit=60${kind ? `&kind=${kind}` : ""}`),
+    queryFn: () => apiGet<ClientAsset[]>(`/api/assets?limit=160${kind ? `&kind=${kind}` : ""}`),
   });
+
+/** 删除素材：连文件一起删，成功后就地从列表里摘掉 */
+export function useDeleteAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      request<{ deleted: { id: string; name: string; files: number } }>(
+        `/api/assets/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["assets"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
 
 /* ------------------------------ 账号 / 订阅 / 积分 ------------------------------ */
 

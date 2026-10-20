@@ -6,6 +6,7 @@ import { addAsset, audit, listAssets } from "@/lib/jobs/repo";
 import { clientAsset } from "@/lib/jobs/serialize";
 import { storage } from "@/lib/storage";
 import { probeImage } from "@/lib/media/image";
+import { thumbMap } from "@/lib/assets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ function kindOf(mime: string): { kind: string; ext: string } {
   if (mime.startsWith("image/")) return { kind: "image", ext: mime.split("/")[1] ?? "png" };
   if (mime.startsWith("video/")) return { kind: "video", ext: mime.split("/")[1] ?? "mp4" };
   if (mime.startsWith("audio/")) return { kind: "audio", ext: mime.split("/")[1] ?? "mp3" };
+  if (mime.startsWith("text/")) return { kind: "text", ext: mime.split("/")[1] ?? "txt" };
   return { kind: "document", ext: "bin" };
 }
 
@@ -26,12 +28,19 @@ export async function GET(req: NextRequest) {
   const session = guard.session;
   const sp = req.nextUrl.searchParams;
   const rows = await listAssets(session.orgId, {
-    limit: Number(sp.get("limit") ?? 60),
+    limit: Number(sp.get("limit") ?? 120),
     kind: sp.get("kind") ?? undefined,
     role: sp.get("role") ?? undefined,
     jobId: sp.get("job") ?? undefined,
   });
-  return ok(rows.map(clientAsset));
+
+  // 缩略图单独查一次再挂上去：列表要的是 240px 的小图，
+  // 直接拖 1080px 的成品会在素材多的账号上变成几百 MB 流量。
+  const thumbs = await thumbMap(
+    session.orgId,
+    rows.filter((r) => r.role !== "thumbnail").map((r) => r.id),
+  );
+  return ok(rows.map((r) => clientAsset(r, thumbs.get(r.id)?.url ?? null)));
 }
 
 /** 素材上传：multipart，写入对象存储并登记元数据 */

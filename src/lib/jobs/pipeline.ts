@@ -16,12 +16,14 @@ import {
 } from "@/lib/media/image";
 import { buildShots, renderShot, type Timeline } from "@/lib/media/video";
 import { storage } from "@/lib/storage";
+import { safeFileName } from "@/lib/assets";
 import { moderate } from "@/lib/moderation";
-import { refund } from "@/lib/credits";
+import { adjust, refund } from "@/lib/credits";
 import { planCodeOf } from "@/lib/billing";
 import { resolveModel, type ResolvedModel } from "@/lib/ai/router";
 import { speechArk, generateImageArk, createVideoTaskArk, fetchVideoTaskArk } from "@/lib/ai/adapters";
-import type { ModelKind } from "@/lib/ai/catalog";
+import { modelByKey, modelsOfKind, type ModelKind } from "@/lib/ai/catalog";
+import { quoteCost as priceOf } from "@/lib/domain/pricing";
 import { q, q1 } from "@/lib/db";
 import {
   addAsset,
@@ -163,6 +165,74 @@ async function markModel(job: JobRow, r: ResolvedModel, costCny: number) {
 }
 
 /**
+ * 降级重算 —— 「按实际执行的引擎结账」。
+ *
+ * 云端模型鉴权失败或超时后，流水线会回落本地引擎并写上 output.degraded。
+ * 如果这时还按原选的云端模型收费，就是「没交付的东西照价收钱」：
+ * 卡片写「豆包 · 20 秒 · 7 积分」，实际是本地引擎 0.1 秒跑完，账却不是这么算的。
+ *
+ * 这里按真正跑完的那个模型重算一次，多收的退回积分账本。
+ * **只退不补**：事后加价等于暗改价格，宁可少收。
+ */
+async function settleBilling(
+  job: JobRow,
+  tool: ToolDef,
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+): Promise<{ charged: number; actual: number; refunded: number; note: string } | null> {
+  const degraded = typeof output.degraded === "string" ? output.degraded : null;
+  if (!degraded) return null;
+
+  const model = (output.model ?? {}) as { key?: string; keySource?: string };
+  const actualKey = String(model.key ?? output.modelKey ?? "");
+  // 网关降级时给的可能是适配器 id（local），不是目录 key（local-text），
+  // 查不到就按「该类型的本地引擎」结算 —— 它才是真正跑完这一单的东西。
+  const spec =
+    (actualKey ? modelByKey(actualKey) : undefined) ??
+    modelsOfKind(MODEL_KIND[tool.kind] ?? "text").find((m) => m.provider === "local");
+  if (!spec) return null; // 目录里没有对应本地引擎，按原价结
+
+  const spent = await q1<{ delta: number }>(
+    `select delta from credit_ledger where idempotency_key = $1`,
+    [`job:${job.id}:consume`],
+  );
+  const charged = Math.abs(Number(spent?.delta ?? 0));
+  if (!charged) return null;
+
+  const planCode = await planCodeOf(job.org_id);
+  const keySource =
+    spec.provider === "local" ? "platform" : model.keySource === "byok" ? "byok" : "platform";
+  const actual = priceOf(tool, spec.unitPrice, keySource, planCode, input);
+  const diff = charged - actual;
+
+  if (diff > 0) {
+    await adjust({
+      orgId: job.org_id,
+      credits: diff,
+      reason: `服务降级，按实际执行的「${spec.label}」重新计价`,
+      key: `job:${job.id}:reprice`,
+      meta: { jobId: job.id, charged, actual, modelKey: actualKey, degraded },
+    });
+    await audit({
+      orgId: job.org_id,
+      action: "job.repriced",
+      target: job.id,
+      detail: { tool: tool.slug, charged, actual, refunded: diff, modelKey: actualKey },
+    });
+  }
+
+  return {
+    charged,
+    actual,
+    refunded: Math.max(0, diff),
+    note:
+      diff > 0
+        ? `按实际执行的「${spec.label}」结算，退回 ${diff} 积分`
+        : `按实际执行的「${spec.label}」结算`,
+  };
+}
+
+/**
  * 执行一个任务。由 worker 调用。
  * 状态机：running → post_processing → reviewing → succeeded
  */
@@ -206,6 +276,9 @@ export async function runJob(job: JobRow): Promise<void> {
 
     if (await isCanceled(job.id)) return;
 
+    // 降级了就按实际执行的模型重新结账（差额退回），再进入审核与收尾
+    const billing = await settleBilling(job, tool, input, output);
+
     // ---- 内容审核 ----
     await updateJob(job.id, { status: "reviewing", stage: "内容审核", progress: 92 });
     const textToCheck = collectText(output);
@@ -219,7 +292,11 @@ export async function runJob(job: JobRow): Promise<void> {
       suggestion: verdict.suggestion,
     });
 
-    const finalOutput = { ...output, moderation: verdict };
+    const finalOutput = {
+      ...output,
+      moderation: verdict,
+      ...(billing ? { billing } : {}),
+    };
     await updateJob(job.id, {
       status: "succeeded",
       stage: verdict.level === "pass" ? "已完成" : "已完成（有审核提示）",
@@ -315,6 +392,29 @@ async function runCopy(
     cost_cny: res.usage.costCny.toFixed(4),
   });
 
+  // 文案也落盘：素材库要能看见、能下载、能删。
+  // 正文写 utf-8 的 .md（带标题），前端预览与下载都用这一份。
+  const mdName = `${safeFileName(title, "文案")}.md`;
+  const mdBody = Buffer.from(`# ${title}\n\n${res.plain}\n`, "utf8");
+  const mdKey = await put(job.org_id, job.id, "final.md", mdBody, "text/markdown");
+  const textAsset = await addAsset({
+    orgId: job.org_id,
+    jobId: job.id,
+    kind: "text",
+    role: "final",
+    name: mdName,
+    mime: "text/markdown",
+    body: mdBody,
+    storageKey: mdKey,
+    meta: {
+      docId,
+      tool: tool.slug,
+      chars: res.plain.length,
+      preview: res.plain.replace(/\s+/g, " ").slice(0, 180),
+      modelKey: res.modelKey,
+    },
+  });
+
   await addUsage({
     orgId: job.org_id,
     jobId: job.id,
@@ -333,6 +433,8 @@ async function runCopy(
     blocks: res.blocks,
     html,
     plain: res.plain,
+    /** 素材库里可直接下载的那份 .md */
+    textAsset: publicAsset(textAsset),
     provider: res.provider,
     model: res.model,
     modelKey: res.modelKey,

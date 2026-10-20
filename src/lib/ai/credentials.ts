@@ -156,12 +156,19 @@ export async function deleteCredential(orgId: string, provider: ProviderId): Pro
 /**
  * 取某租户在某供应商上实际可用的 Key。
  * 优先级：BYOK（用户自己的）> 平台托管。
- * 返回 source 是为了计费与审计区分「谁在付费」。
+ *
+ * 返回三个东西，各有用途：
+ *   apiKey  —— 调用时用
+ *   source  —— 计费与审计区分「谁在付费」
+ *   healthy —— 上次调用是否失败。**不阻断使用，但会影响路由排序**：
+ *              一个刚被判 401 的 Key，不该继续被自动选中，
+ *              否则卡片写着「豆包 · 20 秒 · 1 积分」，跑起来却掉回本地引擎，
+ *              报价与实际执行的路径就是两张皮。
  */
 export async function resolveKey(
   orgId: string,
   provider: ProviderId,
-): Promise<{ apiKey: string; source: "byok" | "platform" | "none" }> {
+): Promise<{ apiKey: string; source: "byok" | "platform" | "none"; healthy: boolean }> {
   const row = await q1<{ secret_cipher: string; status: string }>(
     // status='error' 只是「上次调用失败」的标记，不阻断使用 ——
     // 一次限流或网络抖动不该让用户的 Key 永久失效。只有 disabled 才真的停用。
@@ -171,15 +178,19 @@ export async function resolveKey(
   );
   if (row?.secret_cipher) {
     try {
-      return { apiKey: decryptSecret(row.secret_cipher), source: "byok" };
+      return {
+        apiKey: decryptSecret(row.secret_cipher),
+        source: "byok",
+        healthy: row.status !== "error",
+      };
     } catch (err) {
       await markError(orgId, provider, `凭证解密失败：${(err as Error).message}`);
       // 解密失败不静默回落到平台 Key，避免用户以为在用自己的 Key 却被计费
-      return { apiKey: "", source: "none" };
+      return { apiKey: "", source: "none", healthy: false };
     }
   }
   const pk = platformKey(provider);
-  return { apiKey: pk, source: pk ? "platform" : "none" };
+  return { apiKey: pk, source: pk ? "platform" : "none", healthy: Boolean(pk) };
 }
 
 export async function markUsed(orgId: string, provider: ProviderId): Promise<void> {
