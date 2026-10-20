@@ -13,5 +13,6 @@ data/
 # 临时
 .probe/
 *.log
+*.tsbuildinfo
 .DS_Store
 Thumbs.db

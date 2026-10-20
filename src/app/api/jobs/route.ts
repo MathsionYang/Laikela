@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     preferredKey: body.modelKey ?? undefined,
     capability: tool.kind === "copy" ? "copy" : undefined,
   });
-  const cost = quoteCost(tool.creditCost, model);
+  const cost = quoteCost(tool, model, planCode);
 
   const before = await balance(session.orgId);
   if (before < cost) {

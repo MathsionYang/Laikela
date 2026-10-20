@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import type { ToolDef, ToolField } from "@/lib/domain/tools";
 import { defaultInput } from "@/lib/domain/tools";
+import { quoteCost } from "@/lib/domain/pricing";
 import { uploadAssets, useModels, type ClientAsset, type ModelPayload } from "@/lib/client/api";
 
 interface Props {
@@ -35,8 +36,10 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
   );
 
   const selected = options.find((m) => m.key === modelKey) ?? null;
-  // 自带 Key 只收 1 点平台服务费；平台代付按工具基准价
-  const cost = selected?.keySource === "byok" ? 1 : (tool.creditCost ?? 1);
+  // 与服务端同一份计价函数：平台代付 = 成本×(1+套餐费率)，自带 Key = 只收服务费
+  const cost = selected
+    ? quoteCost(tool, selected.unitPrice, selected.keySource, modelData?.planCode)
+    : (tool.creditCost ?? 1);
 
   const set = (id: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [id]: v }));

@@ -38,7 +38,18 @@ export interface ModelSpec {
   modelName: string;
   /** 上下文长度（K token），仅文本 */
   contextK?: number;
-  /** 计费单位与单价（元） */
+  /**
+   * 计费单位与「采购成本价」。
+   *
+   * unitPrice 一律是**供应商官方牌价**（元 / unit），不是对外售价。
+   * 对外售价 = unitPrice × (1 + 套餐服务费率)，由 quoteCost() 统一算，
+   * 这样调价只需改一处费率，不会被散落在各模型上的加价埋掉。
+   *
+   * 文本类取「输入:输出 = 1.6:1」的加权单价（实测口径见 docs/PRICING.md）：
+   *   DeepSeek-V4-Flash (1.00, 2.00) 元/M → 1.385 元/M → 0.0014 元/K
+   *   DeepSeek-V4-Pro   (3.00, 6.00) 元/M → 4.154 元/M → 0.0042 元/K
+   *   豆包 Seed-2.1-Pro (6.00,30.00) 元/M → 15.231 元/M → 0.0152 元/K
+   */
   unit: "k_token" | "image" | "video_second" | "k_char" | "render";
   unitPrice: number;
   /** 平台代付时扣多少积分 */
@@ -68,14 +79,14 @@ export const MODEL_CATALOG: ModelSpec[] = [
     key: "deepseek-chat",
     provider: "deepseek",
     vendor: "DeepSeek",
-    label: "DeepSeek V3",
+    label: "DeepSeek V4 Flash",
     kind: "text",
     protocol: "openai-chat",
     path: "/chat/completions",
-    modelName: "deepseek-chat",
+    modelName: "deepseek-flash",
     contextK: 64,
     unit: "k_token",
-    unitPrice: 0.002,
+    unitPrice: 0.0014,
     credits: 1,
     requiresPlan: "creator",
     capabilities: ["copy", "fast", "json"],
@@ -86,14 +97,14 @@ export const MODEL_CATALOG: ModelSpec[] = [
     key: "deepseek-reasoner",
     provider: "deepseek",
     vendor: "DeepSeek",
-    label: "DeepSeek R1",
+    label: "DeepSeek V4 Pro",
     kind: "text",
     protocol: "openai-chat",
     path: "/chat/completions",
-    modelName: "deepseek-reasoner",
+    modelName: "deepseek-v4-pro",
     contextK: 64,
     unit: "k_token",
-    unitPrice: 0.004,
+    unitPrice: 0.0042,
     credits: 2,
     requiresPlan: "studio",
     capabilities: ["copy", "reasoning", "json"],
@@ -104,14 +115,14 @@ export const MODEL_CATALOG: ModelSpec[] = [
     key: "doubao-pro-32k",
     provider: "doubao",
     vendor: "豆包 · 火山方舟",
-    label: "豆包 Pro 32K",
+    label: "豆包 Seed 2.1 Pro",
     kind: "text",
     protocol: "openai-chat",
     path: "/chat/completions",
-    modelName: "doubao-pro-32k",
+    modelName: "doubao-seed-2-1-pro",
     contextK: 32,
     unit: "k_token",
-    unitPrice: 0.0015,
+    unitPrice: 0.0152,
     credits: 1,
     requiresPlan: "creator",
     capabilities: ["copy", "json"],
@@ -128,7 +139,7 @@ export const MODEL_CATALOG: ModelSpec[] = [
     path: "",
     modelName: "local-rules",
     unit: "k_token",
-    unitPrice: 0,
+    unitPrice: 0.0001,
     credits: 0,
     requiresPlan: "free",
     capabilities: ["copy", "json", "offline"],
@@ -140,13 +151,13 @@ export const MODEL_CATALOG: ModelSpec[] = [
     key: "doubao-image-2.5",
     provider: "doubao",
     vendor: "豆包 · 火山方舟",
-    label: "Image 2.5",
+    label: "Seedream 5.0 Pro",
     kind: "image",
     protocol: "ark-image",
     path: "/images/generations",
-    modelName: "doubao-seedream-2-5",
+    modelName: "doubao-seedream-5-0-pro",
     unit: "image",
-    unitPrice: 0.25,
+    unitPrice: 0.30,
     credits: 6,
     requiresPlan: "creator",
     capabilities: ["poster", "illustration"],
@@ -180,7 +191,7 @@ export const MODEL_CATALOG: ModelSpec[] = [
     path: "/contents/generations/tasks",
     modelName: "doubao-seedance-2-5",
     unit: "video_second",
-    unitPrice: 0.12,
+    unitPrice: 1.51,
     credits: 12,
     requiresPlan: "studio",
     capabilities: ["text2video", "img2video"],
@@ -196,7 +207,7 @@ export const MODEL_CATALOG: ModelSpec[] = [
     protocol: "local",
     path: "",
     modelName: "local-storyboard",
-    unit: "render",
+    unit: "video_second",
     unitPrice: 0.01,
     credits: 4,
     requiresPlan: "free",
@@ -215,7 +226,7 @@ export const MODEL_CATALOG: ModelSpec[] = [
     path: "/audio/speech",
     modelName: "doubao-tts",
     unit: "k_char",
-    unitPrice: 0.03,
+    unitPrice: 0.05,
     credits: 2,
     requiresPlan: "creator",
     capabilities: ["tts", "narration"],

@@ -40,7 +40,20 @@ export interface ToolDef {
   tagline: string;
   kind: ToolKind;
   etaSeconds: number;
+  /**
+   * 该任务在**基准模型**下的标准扣分（积分），用于卡片展示与末位兜底。
+   * 真实扣费由 quoteCost(tool, model, plan) 按模型单价实时算，见 lib/ai/router.ts。
+   */
   creditCost: number;
+  /**
+   * 该任务的**计费量**，单位随任务的产出类型走：
+   *   copy  → 千 token（输入+输出加权）
+   *   image → 张
+   *   video → 秒
+   *   audio → 千字符
+   * 乘上所选模型的 unitPrice 就是成本价，这是「换模型不同价」的唯一依据。
+   */
+  costUnits: number;
   badge?: "new" | "hot";
   icon: IconName;
   art: string;
@@ -131,6 +144,7 @@ export const TOOLS: ToolDef[] = [
     kind: "copy",
     etaSeconds: 20,
     creditCost: 1,
+    costUnits: 4.0,
     badge: "hot",
     icon: "pen",
     art: "/assets/tools/copy-smart.jpg",
@@ -155,6 +169,7 @@ export const TOOLS: ToolDef[] = [
     kind: "copy",
     etaSeconds: 25,
     creditCost: 1,
+    costUnits: 5.5,
     icon: "tag",
     art: "/assets/tools/copy-product.jpg",
     outcome: "卖点排序 / 详情页文案 / 广告语 / 禁用承诺检查",
@@ -174,6 +189,7 @@ export const TOOLS: ToolDef[] = [
     kind: "copy",
     etaSeconds: 30,
     creditCost: 1,
+    costUnits: 5.0,
     icon: "bulb",
     art: "/assets/tools/copy-topic.jpg",
     outcome: "选题卡（标题 / 切入角 / 预估热度 / 竞争度）",
@@ -196,6 +212,7 @@ export const TOOLS: ToolDef[] = [
     kind: "copy",
     etaSeconds: 20,
     creditCost: 1,
+    costUnits: 4.0,
     badge: "new",
     icon: "mask",
     art: "/assets/tools/copy-persona.jpg",
@@ -220,7 +237,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "文字 + 参考图，生成一组有方向的视觉素材。",
     kind: "image",
     etaSeconds: 40,
-    creditCost: 4,
+    creditCost: 3,
+    costUnits: 1,
     icon: "palette",
     art: "/assets/tools/image-gen.jpg",
     outcome: "多张 PNG（含缩略图与生成参数）",
@@ -244,6 +262,7 @@ export const TOOLS: ToolDef[] = [
     kind: "image",
     etaSeconds: 35,
     creditCost: 3,
+    costUnits: 1,
     icon: "layout",
     art: "/assets/tools/image-poster.jpg",
     outcome: "海报 PNG（真实字体排版，文字不会糊）",
@@ -266,7 +285,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "配音、BGM 与音效自动对齐成一条声音轨道。",
     kind: "audio",
     etaSeconds: 25,
-    creditCost: 2,
+    creditCost: 1,
+    costUnits: 0.3,
     icon: "wave",
     art: "/assets/tools/audio-tts.jpg",
     outcome: "WAV 音轨 + 波形 + 分段时间戳",
@@ -300,7 +320,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "素材进来，节奏、转场、字幕、配乐一次成片。",
     kind: "video",
     etaSeconds: 180,
-    creditCost: 10,
+    creditCost: 6,
+    costUnits: 5,
     badge: "hot",
     icon: "film",
     art: "/assets/tools/video-movie.jpg",
@@ -321,7 +342,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "多套开头 × BGM × 字幕批量组合，一次出片。",
     kind: "video",
     etaSeconds: 300,
-    creditCost: 14,
+    creditCost: 9,
+    costUnits: 8,
     icon: "layers",
     art: "/assets/tools/video-mix.jpg",
     outcome: "N 个变体的分镜与关键帧，附组合矩阵",
@@ -343,7 +365,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "给门店生成团购、到店与活动宣传视频。",
     kind: "video",
     etaSeconds: 120,
-    creditCost: 8,
+    creditCost: 6,
+    costUnits: 5,
     icon: "store",
     art: "/assets/tools/video-store.jpg",
     outcome: "门店视频分镜 / 口播稿 / 团购卡片画面",
@@ -367,7 +390,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "输入文案即可生成真人口播，无需出镜。",
     kind: "video",
     etaSeconds: 90,
-    creditCost: 12,
+    creditCost: 7,
+    costUnits: 6,
     icon: "uservideo",
     art: "/assets/tools/avatar-talking.jpg",
     outcome: "口播分镜 / 逐句时间码 / 主播关键帧",
@@ -391,7 +415,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "花字、贴纸、弹幕与热门音效，一次补齐平台氛围。",
     kind: "video",
     etaSeconds: 120,
-    creditCost: 9,
+    creditCost: 7,
+    costUnits: 6,
     badge: "new",
     icon: "sticker",
     art: "/assets/tools/avatar-net.jpg",
@@ -423,7 +448,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "发现正在上涨的话题，快速转成你的跟进内容。",
     kind: "copy",
     etaSeconds: 30,
-    creditCost: 2,
+    creditCost: 1,
+    costUnits: 5.5,
     icon: "flame",
     art: "/assets/tools/growth-trend.jpg",
     outcome: "跟进脚本 / 热度曲线 / 发布窗口建议",
@@ -442,7 +468,8 @@ export const TOOLS: ToolDef[] = [
     tagline: "从一条爆款视频，反推可复用的结构与分镜。",
     kind: "copy",
     etaSeconds: 40,
-    creditCost: 3,
+    creditCost: 2,
+    costUnits: 8.0,
     icon: "scan",
     art: "/assets/tools/growth-reverse.jpg",
     outcome: "分镜表 / 结构拆解 / 复刻建议",
@@ -468,6 +495,7 @@ export const TOOLS: ToolDef[] = [
     kind: "image",
     etaSeconds: 40,
     creditCost: 3,
+    costUnits: 1,
     icon: "frame",
     art: "/assets/tools/growth-cover.jpg",
     outcome: "封面候选 PNG（按尺寸出图，含文案安全区）",

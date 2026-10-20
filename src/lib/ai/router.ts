@@ -20,6 +20,7 @@ import {
 } from "./catalog";
 import { baseUrlOf, markError, markUsed, resolveKey, type ProviderId } from "./credentials";
 import { chatCompletion } from "./adapters";
+import { quoteCost as priceOf, SERVICE_RATE } from "@/lib/domain/pricing";
 import {
   customSpecs,
   endpointIdOf,
@@ -124,20 +125,15 @@ export function creditsFor(spec: ModelSpec, keySource: "byok" | "platform"): num
 }
 
 /**
- * 本次任务实际扣多少积分。
- *
- * 计价口径：积分代表「平台编排 + 算力」，工具价（tool.creditCost）是基准价。
- *  - 平台代付：按工具基准价扣 —— 模型成本已包含在工具价里
- *  - 自带 Key：只扣 1 点平台服务费 —— 模型成本由用户直接付给供应商
- *  - 本地模型：按工具基准价扣（无外部成本，但仍有算力占用）
- *
- * 之所以不直接用 spec.credits 计价：同一个工具换模型应该是「质量差异」，
- * 不该让用户为了换个模型去反复算积分，价格锚点放在工具上更稳定。
+ * 本次任务实际扣多少积分。计价口径统一在 `lib/domain/pricing.ts`，
+ * 前端预览与服务端扣费共用同一份实现，避免两边算出不同的数。
  */
-export function quoteCost(toolCreditCost: number | undefined, r: ResolvedModel): number {
-  const base = Math.max(1, toolCreditCost ?? 1);
-  if (r.keySource === "byok") return 1;
-  return base;
+export function quoteCost(
+  tool: { creditCost?: number; costUnits?: number },
+  r: ResolvedModel,
+  planCode?: string | null,
+): number {
+  return priceOf(tool, r.spec.unitPrice ?? 0, r.keySource, planCode);
 }
 
 /**
