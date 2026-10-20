@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# 运行时产物
+data/
+.env
+.env.local
+.env*.local
+
+# 临时
+.probe/
+*.log
+.DS_Store
+Thumbs.db

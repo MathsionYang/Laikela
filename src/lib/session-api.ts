@@ -1,0 +1,12 @@
+import { fail } from "@/lib/api";
+import { getSession, type SessionUser } from "@/lib/auth";
+
+/**
+ * 接口层的会话守卫。
+ * 用返回值而不是抛异常，避免 SSE 这类长连接里异常被吞掉。
+ */
+export async function requireSession(): Promise<{ session: SessionUser } | { error: Response }> {
+  const session = await getSession();
+  if (!session) return { error: fail("UNAUTHORIZED", "请先登录", 401) };
+  return { session };
+}
