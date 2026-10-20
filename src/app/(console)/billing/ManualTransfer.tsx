@@ -230,27 +230,6 @@ export function ManualTransfer() {
             {submit.isPending ? "提交中…" : "提交转账申报"}
             <Icon name="arrow" size={13} />
           </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-sm"
-            disabled={subscribe.isPending}
-            title="演示环境直接开通，用于验证套餐与积分链路"
-            onClick={async () => {
-              const code = planCode || "creator";
-              setMsg(null);
-              try {
-                const r = await subscribe.mutateAsync({ planCode: code, months: 1 });
-                setMsg({
-                  tone: "ok",
-                  text: `演示通道已直接开通 ${r.plan.name}，发放 ${r.grantedCredits} 积分（无需真实付款）。`,
-                });
-              } catch (err) {
-                setMsg({ tone: "err", text: err instanceof ApiError ? err.message : "开通失败" });
-              }
-            }}
-          >
-            演示：跳过付款直接开通
-          </button>
           {msg && (
             <span
               className="flex items-start gap-1.5 text-[11px]"

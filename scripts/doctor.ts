@@ -52,15 +52,43 @@ async function main() {
     results.push(false);
   }
 
-  // 模型供应商
+  // 模型供应商：配了 Key 就真探一次 —— 「Key 有效」和「模型名存在」是两件事，
+  // 只写着「已配置云端密钥」会让人以为链路通了，实际可能一调就 400。
   const { env } = await import("../src/lib/env");
-  line(
-    true,
-    "模型供应商",
-    env.hasCloudProvider
-      ? "已配置云端密钥，文案走真实模型"
-      : "未配置密钥 → 本地规则引擎兜底（界面会标注）",
-  );
+  const ds = env.providers.deepseek;
+  if (!ds.apiKey) {
+    line(
+      true,
+      "模型供应商",
+      "未配置 DEEPSEEK_API_KEY → 本地规则引擎兜底（界面会标注）；接真模型：填 Key 后跑 npm run check:ai",
+    );
+  } else {
+    try {
+      const res = await fetch(`${ds.baseUrl.replace(/\/$/, "")}/models`, {
+        headers: { authorization: `Bearer ${ds.apiKey}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        line(false, "模型供应商", `GET /models 返回 HTTP ${res.status}（Key 无效或被限流）；跑 npm run check:ai 看详情`);
+        results.push(false);
+      } else {
+        const body = (await res.json()) as { data?: Array<{ id?: string }> };
+        const ids = (body.data ?? []).map((m) => String(m.id ?? "")).filter(Boolean);
+        const okName = ids.includes(ds.model);
+        line(
+          okName,
+          "模型供应商",
+          okName
+            ? `DeepSeek ${ds.model} 就绪 · 账号可用 ${ids.length} 个模型`
+            : `DEEPSEEK_MODEL=${ds.model} 不在账号模型列表（可用：${ids.join(" / ") || "空"}）`,
+        );
+        if (!okName) results.push(false);
+      }
+    } catch (e) {
+      line(false, "模型供应商", `不可达：${(e as Error).message}（检查出网/代理）`);
+      results.push(false);
+    }
+  }
 
   // FFmpeg（可选）
   const { spawnSync } = await import("node:child_process");

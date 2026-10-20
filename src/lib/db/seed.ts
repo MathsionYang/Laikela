@@ -11,6 +11,15 @@ import { TEMPLATE_SPECS } from "@/lib/domain/templates";
 const DEMO_PASSWORD = "laikela2026";
 
 /**
+ * 是否写入「演示占位内容」（编造的历史任务、sample 热点、示例人设）。
+ *
+ * 默认 **关闭**：这些假数据会污染统计（云端耗时中位数被 0.1 秒的假任务拉低）、
+ * 让看板看起来有内容但点进去全是占位。要演示时显式 `SEED_DEMO=1`。
+ * 注意：账号、套餐、模型目录、音色库是**功能必需**，不受这个开关影响。
+ */
+const SEED_DEMO = process.env.SEED_DEMO === "1";
+
+/**
  * 套餐目录（定义在 lib/domain/plans.ts）：
  * 订阅决定每月发多少积分，积分决定一次任务扣多少。
  */
@@ -36,7 +45,7 @@ export async function seedAll(force = false) {
     await q(
       `insert into organizations (id, name, plan, quota_month) values ($1,$2,$3,$4)
        on conflict (id) do nothing`,
-      [DEMO_ORG_ID, "来客啦 · 演示空间", "studio", 2000],
+      [DEMO_ORG_ID, "来客啦 · 工作空间", "studio", 2000],
     );
   }
 
@@ -83,35 +92,40 @@ export async function seedAll(force = false) {
     }
   }
 
-  // ---- 人设档案 ----
-  const persona = await q1(`select id from personas where org_id = $1 limit 1`, [DEMO_ORG_ID]);
-  if (!persona) {
-    await q(
-      `insert into personas (id, org_id, name, positioning, traits, catchphrase, boundaries)
-       values ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        newId("psn"),
-        DEMO_ORG_ID,
-        "林小满的咖啡日记",
-        "门店老板",
-        JSON.stringify(["真诚", "克制", "专业"]),
-        "说人话，讲真话",
-        "不承诺功效、不贬低同行、不使用夸张绝对化用语",
-      ],
-    );
+  // ---- 人设档案（演示内容，SEED_DEMO=1 才建）----
+  if (SEED_DEMO) {
+    const persona = await q1(`select id from personas where org_id = $1 limit 1`, [DEMO_ORG_ID]);
+    if (!persona) {
+      await q(
+        `insert into personas (id, org_id, name, positioning, traits, catchphrase, boundaries)
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          newId("psn"),
+          DEMO_ORG_ID,
+          "林小满的咖啡日记",
+          "门店老板",
+          JSON.stringify(["真诚", "克制", "专业"]),
+          "说人话，讲真话",
+          "不承诺功效、不贬低同行、不使用夸张绝对化用语",
+        ],
+      );
+    }
   }
 
-  // ---- 热点事件 ----
-  const trends: Array<[string, string, number, number]> = [
-    ["抖音", "多巴胺穿搭", 98600, 42.5],
-    ["小红书", "早八人的早餐", 62400, 31.2],
-    ["抖音", "开学第一课", 214000, 18.7],
-    ["视频号", "秋日第一杯拿铁", 38200, 25.4],
-    ["小红书", "露营咖啡车", 45100, 12.9],
-    ["微博", "双 11 预售攻略", 176000, 56.3],
-    ["抖音", "AI 换脸避坑", 88400, 63.1],
-    ["小红书", "租房改造 2000 元", 51900, 9.8],
-  ];
+  // ---- 热点事件（样例数据，SEED_DEMO=1 才写）----
+  // 真实热点由 /api/research/trends 抓取；样例只用于本地演示。
+  const trends: Array<[string, string, number, number]> = SEED_DEMO
+    ? [
+        ["抖音", "多巴胺穿搭", 98600, 42.5],
+        ["小红书", "早八人的早餐", 62400, 31.2],
+        ["抖音", "开学第一课", 214000, 18.7],
+        ["视频号", "秋日第一杯拿铁", 38200, 25.4],
+        ["小红书", "露营咖啡车", 45100, 12.9],
+        ["微博", "双 11 预售攻略", 176000, 56.3],
+        ["抖音", "AI 换脸避坑", 88400, 63.1],
+        ["小红书", "租房改造 2000 元", 51900, 9.8],
+      ]
+    : [];
   for (const [platform, keyword, heat, growth] of trends) {
     await q(
       `insert into trend_events (id, org_id, platform, keyword, heat, growth, confidence, source, captured_at)
@@ -120,12 +134,13 @@ export async function seedAll(force = false) {
     );
   }
 
-  // ---- 历史任务（让看板与列表一打开就有内容）----
+  // ---- 历史任务（演示占位，SEED_DEMO=1 才写）----
+  // 这批假任务的 output.demo='true'，会污染耗时统计与看板数字，默认不生成。
   const jobCount = await q1<{ n: string }>(
     `select count(*)::text as n from jobs where org_id = $1`,
     [DEMO_ORG_ID],
   );
-  if (!jobCount || jobCount.n === "0") {
+  if (SEED_DEMO && (!jobCount || jobCount.n === "0")) {
     const statuses = ["succeeded", "succeeded", "succeeded", "succeeded", "failed", "canceled"];
     for (let i = 0; i < 46; i++) {
       const tool = TOOLS[i % TOOLS.length];
@@ -269,7 +284,7 @@ async function seedAccountAndPlans() {
   );
   if (!activeSub) {
     const { startSubscription } = await import("@/lib/billing");
-    await startSubscription({ orgId: DEMO_ORG_ID, planCode: "studio", months: 1, channel: "mock" });
+    await startSubscription({ orgId: DEMO_ORG_ID, planCode: "studio", months: 1, channel: "system" });
   }
 
   // 给历史任务补一份积分流水，让账本页一打开就有真实记录

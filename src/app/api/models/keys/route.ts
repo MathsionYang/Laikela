@@ -12,7 +12,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const isProvider = (v: unknown): v is ProviderId => v === "deepseek" || v === "doubao";
+const isProvider = (v: unknown): v is ProviderId =>
+  v === "deepseek" || v === "doubao" || v === "bailian";
 
 /** 只看状态：返回的是掩码，永远不回传明文 */
 export async function GET() {

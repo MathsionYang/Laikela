@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile, unlink, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import {
   S3Client,
@@ -18,7 +18,12 @@ export interface StoragePort {
   readonly driver: string;
   put(key: string, body: Buffer, mime: string): Promise<void>;
   get(key: string): Promise<Buffer>;
-  remove(key: string): Promise<void>;
+  /**
+   * 删文件。返回 true 表示这次确实删掉了一个文件，false 表示本来就不存在。
+   * 删除失败（文件被占用、权限不足）必须抛错 —— 静默吞掉会让「回收了几个文件」
+   * 变成假数字，也看不出孤儿文件是怎么攒下来的。
+   */
+  remove(key: string): Promise<boolean>
   /** 本地 driver 的绝对路径，供 sharp 等直接读盘；S3 driver 返回 null */
   localPath(key: string): string | null;
 }
@@ -61,6 +66,7 @@ const s3Storage: StoragePort = {
   },
   async remove(key) {
     await client().send(new DeleteObjectCommand({ Bucket: env.storage.bucket, Key: key }));
+    return true;
   },
   localPath() {
     return null;
@@ -80,7 +86,15 @@ const local: StoragePort = {
     return readFile(path.join(root, key));
   },
   async remove(key) {
-    await unlink(path.join(root, key)).catch(() => {});
+    try {
+      await unlink(path.join(root, key));
+      return true;
+    } catch (err) {
+      // 文件本来就不存在 → 目标已达成，算成功但不算回收
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      // Windows 上文件被占用（浏览器正在播放）会 EBUSY/EPERM，必须让调用方知道
+      throw err;
+    }
   },
   localPath(key) {
     return path.join(root, key);
@@ -120,9 +134,11 @@ export async function storageHealth(): Promise<{ ok: boolean; detail: string }> 
       await mkdir(root, { recursive: true });
       const probe = path.join(root, ".health");
       await writeFile(probe, "ok");
-      const s = await stat(probe);
-      await unlink(probe);
-      return { ok: true, detail: `本地目录 ${root} · ${s.size} 字节` };
+      // 写进去又读出来就够了；探测文件删不掉（某些沙箱/杀软会拦 unlink）
+      // 只说明清理不干净，不代表存储不可用 —— 别把它报成红灯。
+      await unlink(probe).catch(() => {});
+      // 这里只验证了「能写能删」，别报探测文件的字节数冒充目录占用
+      return { ok: true, detail: `本地目录 ${root} · 读写正常` };
     }
     await client().send(new HeadBucketCommand({ Bucket: env.storage.bucket }));
     return { ok: true, detail: `S3 ${env.storage.endpoint}/${env.storage.bucket}` };

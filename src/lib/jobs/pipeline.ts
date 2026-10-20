@@ -21,7 +21,14 @@ import { moderate } from "@/lib/moderation";
 import { adjust, refund } from "@/lib/credits";
 import { planCodeOf } from "@/lib/billing";
 import { resolveModel, type ResolvedModel } from "@/lib/ai/router";
-import { speechArk, generateImageArk, createVideoTaskArk, fetchVideoTaskArk } from "@/lib/ai/adapters";
+import {
+  speechArk,
+  generateImageArk,
+  createVideoTaskArk,
+  fetchVideoTaskArk,
+  createVideoTaskDashscope,
+  fetchVideoTaskDashscope,
+} from "@/lib/ai/adapters";
 import { modelByKey, modelsOfKind, type ModelKind } from "@/lib/ai/catalog";
 import { quoteCost as priceOf } from "@/lib/domain/pricing";
 import { q, q1 } from "@/lib/db";
@@ -436,8 +443,12 @@ async function runCopy(
     /** 素材库里可直接下载的那份 .md */
     textAsset: publicAsset(textAsset),
     provider: res.provider,
-    model: res.model,
+    // 和图片/音轨分支保持同一形状：{ key, label, keySource }。
+    // 之前这里是裸字符串，前端 MetaBar 按对象读，导致文案任务的「模型」一栏永远是「—」。
+    model: { key: res.modelKey, label: res.modelLabel, keySource: res.keySource },
     modelKey: res.modelKey,
+    /** 真正发给供应商的 id（deepseek-flash），出错时用来对照日志 */
+    modelName: res.modelName,
     keySource: res.keySource,
     /** 首选模型没跑通时，这里会写清楚降级原因，前端直接显示 */
     degraded: res.degraded,
@@ -867,37 +878,57 @@ async function runVideo(
   if (remoteOf(vmodel) && vmodel) {
     try {
       await stage(job.id, 82, `云端成片 · ${vmodel.spec.label}`);
-      const task = await createVideoTaskArk({
-        baseUrl: vmodel.baseUrl,
-        apiKey: vmodel.apiKey,
-        model: vmodel.spec.modelName,
-        prompt: `${topic}｜${point}｜${cta}`,
-        // 供应商只认 16:9 / 9:16 / 1:1
-        ratio: ratio.includes("横") ? "16:9" : ratio.includes("方") ? "1:1" : "9:16",
-        durationSec: Math.min(12, durationSec),
-      });
+      // 两家供应商的异步协议不同：豆包是 /contents/generations/tasks，
+      // 百炼是 DashScope 原生 /api/v1/... + X-DashScope-Async 头，任务查询也各走各的。
+      const isDashscope = vmodel.spec.protocol === "dashscope-video";
+      const task = isDashscope
+        ? await createVideoTaskDashscope({
+            baseUrl: vmodel.baseUrl,
+            apiKey: vmodel.apiKey,
+            model: vmodel.spec.modelName,
+            prompt: `${topic}｜${point}｜${cta}`,
+            ratio: ratio.includes("横") ? "16:9" : ratio.includes("方") ? "1:1" : "9:16",
+            durationSec: Math.min(12, durationSec),
+          })
+        : await createVideoTaskArk({
+            baseUrl: vmodel.baseUrl,
+            apiKey: vmodel.apiKey,
+            model: vmodel.spec.modelName,
+            prompt: `${topic}｜${point}｜${cta}`,
+            // 供应商只认 16:9 / 9:16 / 1:1
+            ratio: ratio.includes("横") ? "16:9" : ratio.includes("方") ? "1:1" : "9:16",
+            durationSec: Math.min(12, durationSec),
+          });
 
-      const deadline = Date.now() + 6 * 60 * 1000;
+      // 百炼实测 5 秒成片要 184 秒，超时预算给足 10 分钟
+      const deadline = Date.now() + (isDashscope ? 10 : 6) * 60 * 1000;
       let videoUrl: string | undefined;
       while (Date.now() < deadline) {
         if (await isCanceled(job.id)) break;
         await sleep(5000);
-        const t = await fetchVideoTaskArk({
-          baseUrl: vmodel.baseUrl,
-          apiKey: vmodel.apiKey,
-          model: vmodel.spec.modelName,
-          taskId: task.taskId,
-        });
+        const t = isDashscope
+          ? await fetchVideoTaskDashscope({
+              baseUrl: vmodel.baseUrl,
+              apiKey: vmodel.apiKey,
+              model: vmodel.spec.modelName,
+              taskId: task.taskId,
+            })
+          : await fetchVideoTaskArk({
+              baseUrl: vmodel.baseUrl,
+              apiKey: vmodel.apiKey,
+              model: vmodel.spec.modelName,
+              taskId: task.taskId,
+            });
         if (t.videoUrl) {
           videoUrl = t.videoUrl;
           break;
         }
         if (["failed", "canceled", "error"].includes(t.status)) {
-          throw new Error(`Seedance 任务状态 ${t.status}`);
+          throw new Error(`${vmodel.spec.label} 任务状态 ${t.status}`);
         }
         await stage(job.id, 85, `云端成片渲染中 · ${t.status}`);
       }
-      if (!videoUrl) throw new Error("云端成片超时（6 分钟未返回）");
+      if (!videoUrl) throw new Error("云端成片超时（未在预算内返回）");
 
       const mp4 = await download(videoUrl);
       const vKey = await put(job.org_id, job.id, "final.mp4", mp4, "video/mp4");

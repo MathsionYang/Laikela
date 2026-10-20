@@ -290,7 +290,7 @@ function PlanGrid({
           </p>
         </div>
         <span className="mono hidden text-[10px] sm:block" style={{ color: "var(--t3)" }}>
-          演示环境走 mock 支付通道，接入后替换为微信/支付宝
+          在线支付未接入 · 请走人工转账，管理员核对后开通
         </span>
       </div>
 

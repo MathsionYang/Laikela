@@ -11,6 +11,7 @@ export type ModelProtocol =
   | "openai-chat" // OpenAI 协议文本：/chat/completions（DeepSeek、豆包、任意兼容端点）
   | "ark-image" // 豆包 Image 2.5，/images/generations（与 OpenAI 出图协议一致）
   | "ark-video" // 豆包 Seedance 2.5，/contents/generations/tasks
+  | "dashscope-video" // 阿里百炼 Wan，/api/v1/services/aigc/video-generation/video-synthesis + /api/v1/tasks 轮询
   | "ark-tts" // 豆包语音合成，/audio/speech
   | "local"; // 本地规则引擎 / 本地渲染，无外部依赖
 
@@ -19,7 +20,7 @@ export type ModelProtocol =
  * custom = 用户自己接的 OpenAI 兼容端点（URL / 模型名 / Key 都是他填的），
  * 这类模型的凭证在 model_endpoints 表里，不在 provider_credentials。
  */
-export type ProviderKey = "deepseek" | "doubao" | "local" | "custom";
+export type ProviderKey = "deepseek" | "doubao" | "bailian" | "local" | "custom";
 
 export interface ModelSpec {
   /** 全局唯一，前端与服务端都用它引用模型 */
@@ -79,12 +80,16 @@ export const MODEL_CATALOG: ModelSpec[] = [
     key: "deepseek-chat",
     provider: "deepseek",
     vendor: "DeepSeek",
-    label: "DeepSeek V4 Flash",
+    label: "DeepSeek V4.1 Flash",
     kind: "text",
     protocol: "openai-chat",
     path: "/chat/completions",
+    /**
+     * 这里是**出厂默认值**。运行时以 DEEPSEEK_MODEL 为准（见 router.modelNameOf），
+     * 两者必须都是供应商 GET /models 里真实存在的 id，否则 400 model_not_found。
+     */
     modelName: "deepseek-flash",
-    contextK: 64,
+    contextK: 1024,
     unit: "k_token",
     unitPrice: 0.0014,
     credits: 1,
@@ -130,6 +135,25 @@ export const MODEL_CATALOG: ModelSpec[] = [
     note: "国内直连延迟低，作为 DeepSeek 的备份通道",
   },
   {
+    key: "bailian-text",
+    provider: "bailian",
+    vendor: "阿里百炼",
+    label: "通义千问 3.8 Flash",
+    kind: "text",
+    protocol: "openai-chat",
+    path: "/chat/completions",
+    /** 运行时以 BAILIAN_TEXT_MODEL 为准（modelNameOf 只覆盖 DeepSeek 主力档，这里直接读 env） */
+    modelName: "qwen3.8-flash",
+    contextK: 128,
+    unit: "k_token",
+    unitPrice: 0.0005,
+    credits: 1,
+    requiresPlan: "creator",
+    capabilities: ["copy", "fast", "json"],
+    fallback: "deepseek-chat",
+    note: "qwen3.8-flash，实测 730ms 返回正常正文，作为 DeepSeek 之外的第二条文本通道",
+  },
+  {
     key: "local-text",
     provider: "local",
     vendor: "内置",
@@ -145,7 +169,6 @@ export const MODEL_CATALOG: ModelSpec[] = [
     capabilities: ["copy", "json", "offline"],
     note: "零密钥可用，输出确定性结构，用于演示与兜底",
   },
-
   /* -------------------------------- 图像 -------------------------------- */
   {
     key: "doubao-image-2.5",
@@ -162,6 +185,56 @@ export const MODEL_CATALOG: ModelSpec[] = [
     requiresPlan: "creator",
     capabilities: ["poster", "illustration"],
     note: "中文文字渲染好，适合海报与封面底图",
+  },
+  {
+    key: "bailian-image-turbo",
+    provider: "bailian",
+    vendor: "阿里百炼",
+    label: "Qwen-Image 2.1 Turbo",
+    kind: "image",
+    protocol: "ark-image",
+    path: "/images/generations",
+    modelName: "qwen-image-2.1-turbo",
+    unit: "image",
+    unitPrice: 0.15,
+    credits: 16,
+    requiresPlan: "creator",
+    capabilities: ["poster", "cover", "illustration", "fast"],
+    note: "实测 13.2s 出 1024² PNG，同系列里最快，作为默认出图模型",
+  },
+  {
+    key: "bailian-image-pro",
+    provider: "bailian",
+    vendor: "阿里百炼",
+    label: "Qwen-Image 2.1 Pro",
+    kind: "image",
+    protocol: "ark-image",
+    path: "/images/generations",
+    modelName: "qwen-image-2.1-pro",
+    unit: "image",
+    unitPrice: 0.35,
+    credits: 37,
+    requiresPlan: "creator",
+    capabilities: ["poster", "cover", "illustration"],
+    fallback: "bailian-image-turbo",
+    note: "实测 16.1s，细节与文字渲染优于 Turbo",
+  },
+  {
+    key: "bailian-image-3-pro",
+    provider: "bailian",
+    vendor: "阿里百炼",
+    label: "Qwen-Image 3.0 Pro",
+    kind: "image",
+    protocol: "ark-image",
+    path: "/images/generations",
+    modelName: "qwen-image-3.0-pro",
+    unit: "image",
+    unitPrice: 0.5,
+    credits: 53,
+    requiresPlan: "studio",
+    capabilities: ["poster", "cover", "illustration", "quality"],
+    fallback: "bailian-image-pro",
+    note: "实测 48.8s，最慢也最贵，只给「要成片质感」的场景；超时预算需 ≥90s",
   },
   {
     key: "local-render",
@@ -197,6 +270,27 @@ export const MODEL_CATALOG: ModelSpec[] = [
     capabilities: ["text2video", "img2video"],
     byokOnly: true,
     note: "按秒计费、成本高，默认要求自带 Key，避免误点烧钱",
+  },
+  {
+    key: "bailian-video",
+    provider: "bailian",
+    vendor: "阿里百炼",
+    label: "Wan 3.0 Video",
+    kind: "video",
+    protocol: "dashscope-video",
+    path: "/api/v1/services/aigc/video-generation/video-synthesis",
+    modelName: "wan3.0-video",
+    unit: "video_second",
+    /**
+     * 1080p 按秒计费，实测 5 秒成片耗时 184 秒。
+     * 单价高到会让单条视频任务吃掉上千积分 —— 这是真实成本，不做美化。
+     */
+    unitPrice: 0.5,
+    credits: 52,
+    requiresPlan: "studio",
+    capabilities: ["text2video", "img2video", "quality"],
+    fallback: "local-storyboard",
+    note: "1080p/30fps 真成片，异步任务约 3 分钟；按秒计费，单条成本高，慎用",
   },
   {
     key: "local-storyboard",

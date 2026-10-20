@@ -383,7 +383,7 @@ export function LoginForm() {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="text-[11px] font-medium" style={{ color: "var(--t2)" }}>
-              演示账号
+              本机管理员账号
             </div>
             <div className="mono mt-0.5 truncate text-[10.5px]" style={{ color: "var(--t3)" }}>
               {DEMO_EMAIL} / {DEMO_PASSWORD}

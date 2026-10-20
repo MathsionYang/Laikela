@@ -141,10 +141,15 @@ export async function deleteAssets(
       ...versions.map((v) => v.storage_key),
     ]) {
       try {
-        await store.remove(key);
-        files++;
+        if (await store.remove(key)) files++;
       } catch (err) {
-        console.warn("[assets] 删除文件失败，继续删记录：", key, (err as Error).message);
+        // 删不掉（文件被占用/权限）也算删了记录，但要留痕：
+        // 这些 key 会变成孤儿文件，日志里能查到是哪一次、哪一个
+        console.warn(
+          `[assets] 文件回收失败（已删记录，文件残留）：${key}`,
+          (err as NodeJS.ErrnoException).code ?? "",
+          (err as Error).message,
+        );
       }
     }
 

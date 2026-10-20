@@ -11,6 +11,7 @@ import { newId, q, q1 } from "@/lib/db";
 
 const MARK = "migration:users.email_verified_at";
 const COPY_ASSET_MARK = "migration:copy_documents.text_asset";
+const PURGE_DEMO_MARK = "migration:purge_demo_content";
 
 async function once(key: string, fn: () => Promise<void>): Promise<boolean> {
   const done = await q1<{ key: string }>(`select key from app_settings where key = $1`, [key]);
@@ -95,6 +96,87 @@ export async function runMigrations(): Promise<string[]> {
     })
   ) {
     applied.push(COPY_ASSET_MARK);
+  }
+
+  // 清掉演示占位数据：46 条编造的历史任务、8 条 sample 热点、假凭证。
+  //
+  // 为什么必须删而不是"留着也无所谓"：
+  //   1. 演示任务的 output.demo='true'，会被统计任务误当成真实样本 ——
+  //      云端实测耗时曾被这批 0.1 秒的假任务拉成中位数，报价跟着失真。
+  //   2. 假 Key（fake••••cdef）状态是 error，用户选中它必然 401 再降级，
+  //      界面却显示"你的 Key"，等于把故障伪装成配置。
+  // 删之前先导一份 JSON 备份，删错能捞回来。
+  if (
+    await once(PURGE_DEMO_MARK, async () => {
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const path = await import("node:path");
+
+      const demoJobs = await q<{ id: string; org_id: string }>(
+        `select id, org_id from jobs where output->>'demo' = 'true'`,
+      );
+      const ids = demoJobs.map((j) => j.id);
+
+      const [jobs, usage, assets, docs, trends, creds] = await Promise.all([
+        ids.length
+          ? q(`select * from jobs where id = any($1::text[])`, [ids])
+          : Promise.resolve([]),
+        ids.length
+          ? q(`select * from usage_records where job_id = any($1::text[])`, [ids])
+          : Promise.resolve([]),
+        ids.length
+          ? q(`select * from assets where job_id = any($1::text[])`, [ids])
+          : Promise.resolve([]),
+        ids.length
+          ? q(`select * from copy_documents where job_id = any($1::text[])`, [ids])
+          : Promise.resolve([]),
+        q(`select * from trend_events where source = 'sample'`),
+        q(`select id, org_id, provider, key_hint, status from provider_credentials where key_hint like '%fake%'`),
+      ]);
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const dir = path.join(process.cwd(), "data", "backup");
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, `purge-demo-${stamp}.json`),
+        JSON.stringify({ jobs, usage, assets, docs, trends, creds }, null, 2),
+        "utf8",
+      );
+
+      // 素材走 deleteAssets：它连存储文件、缩略图、版本一起回收，
+      // 直接 delete from assets 会留下无法追踪的孤儿文件。
+      if (assets.length) {
+        const { deleteAssets } = await import("@/lib/assets");
+        const byOrg = new Map<string, string[]>();
+        for (const a of assets as Array<{ id: string; org_id: string }>) {
+          const list = byOrg.get(a.org_id) ?? [];
+          list.push(a.id);
+          byOrg.set(a.org_id, list);
+        }
+        const actor = { id: "system", email: "system@laikela.local" };
+        for (const [orgId, list] of byOrg) {
+          for (let i = 0; i < list.length; i += 50) {
+            await deleteAssets(orgId, list.slice(i, i + 50), actor);
+          }
+        }
+      }
+
+      if (ids.length) {
+        await q(`delete from copy_documents where job_id = any($1::text[])`, [ids]);
+        await q(`delete from usage_records where job_id = any($1::text[])`, [ids]);
+        await q(`delete from job_attempts where job_id = any($1::text[])`, [ids]);
+        await q(`delete from assets where job_id = any($1::text[])`, [ids]);
+        await q(`delete from jobs where id = any($1::text[])`, [ids]);
+      }
+      await q(`delete from trend_events where source = 'sample'`);
+      await q(`delete from provider_credentials where key_hint like '%fake%'`);
+
+      console.log(
+        `[db] 已清理演示占位：${ids.length} 个任务 / ${usage.length} 条用量 / ${assets.length} 个素材 / ` +
+          `${trends.length} 条 sample 热点 / ${creds.length} 把假凭证；备份 data/backup/purge-demo-${stamp}.json`,
+      );
+    })
+  ) {
+    applied.push(PURGE_DEMO_MARK);
   }
 
   // 平台管理员引导：ADMIN_EMAILS="a@x.com,b@y.com" 里的账号自动提权。

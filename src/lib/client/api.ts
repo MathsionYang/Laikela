@@ -230,7 +230,7 @@ export async function uploadAssets(files: File[]): Promise<ClientAsset[]> {
 export const useAssets = (kind?: string) =>
   useQuery({
     queryKey: ["assets", kind ?? "all"],
-    queryFn: () => apiGet<ClientAsset[]>(`/api/assets?limit=160${kind ? `&kind=${kind}` : ""}`),
+    queryFn: () => apiGet<ClientAsset[]>(`/api/assets?limit=1000${kind ? `&kind=${kind}` : ""}`),
   });
 
 /** 删除素材：连文件一起删，成功后就地从列表里摘掉 */
@@ -357,7 +357,7 @@ export type ModelKindView = "text" | "image" | "video" | "audio";
 
 export interface ModelPayload {
   key: string;
-  provider: "deepseek" | "doubao" | "local";
+  provider: "deepseek" | "doubao" | "bailian" | "local";
   vendor: string;
   label: string;
   kind: ModelKindView;
@@ -381,7 +381,7 @@ export interface ModelPayload {
 }
 
 export interface CredentialPayload {
-  provider: "deepseek" | "doubao";
+  provider: "deepseek" | "doubao" | "bailian";
   configured: boolean;
   label: string | null;
   keyHint: string | null;
@@ -435,7 +435,7 @@ export const useModels = () =>
 export function useSaveKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { provider: "deepseek" | "doubao"; apiKey: string; label?: string }) =>
+    mutationFn: (vars: { provider: "deepseek" | "doubao" | "bailian"; apiKey: string; label?: string }) =>
       apiPost<{ credential: CredentialPayload }>("/api/models/keys", vars),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["models"] });
@@ -446,7 +446,7 @@ export function useSaveKey() {
 export function useDeleteKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (provider: "deepseek" | "doubao") =>
+    mutationFn: (provider: "deepseek" | "doubao" | "bailian") =>
       request<{ credentials: CredentialPayload[] }>(`/api/models/keys?provider=${provider}`, {
         method: "DELETE",
       }),

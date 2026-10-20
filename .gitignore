@@ -16,3 +16,7 @@ data/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+
+# 商业口径文档：含费率、成本、毛利推导，仅本地保留，不进公开仓库
+/docs/PRICING.md
+/docs/PAYMENT-ACCESS.md

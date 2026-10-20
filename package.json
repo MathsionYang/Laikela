@@ -10,13 +10,17 @@
     "dev:all": "concurrently -n app,worker -c cyan,magenta \"next dev\" \"tsx watch worker/index.ts\"",
     "build": "next build",
     "start": "next start",
+    "serve": "node scripts/serve.mjs",
     "worker": "tsx worker/index.ts",
     "typecheck": "tsc --noEmit",
     "doctor": "tsx scripts/doctor.ts",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f --tail=40",
-    "check:margin": "tsx scripts/check-margin.ts"
+    "check:margin": "tsx scripts/check-margin.ts",
+    "check:ai": "tsx scripts/check-ai.ts",
+    "assets:dedupe": "tsx scripts/dedupe-assets.ts",
+    "assets:gc": "tsx scripts/clean-orphans.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

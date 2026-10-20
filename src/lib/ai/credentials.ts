@@ -15,7 +15,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { env } from "@/lib/env";
 import { newId, q, q1 } from "@/lib/db";
 
-export type ProviderId = "deepseek" | "doubao";
+export type ProviderId = "deepseek" | "doubao" | "bailian";
 
 export interface CredentialRow {
   id: string;
@@ -39,7 +39,7 @@ export interface CredentialView {
   lastError: string | null;
 }
 
-const PROVIDERS: ProviderId[] = ["deepseek", "doubao"];
+const PROVIDERS: ProviderId[] = ["deepseek", "doubao", "bailian"];
 
 /* ------------------------------- 加解密 ------------------------------- */
 
@@ -80,13 +80,14 @@ const hintOf = (key: string) =>
 export function platformKey(provider: ProviderId): string {
   if (provider === "deepseek") return env.providers.deepseek.apiKey;
   if (provider === "doubao") return env.providers.doubao.apiKey;
+  if (provider === "bailian") return env.providers.bailian.apiKey;
   return "";
 }
 
 export function baseUrlOf(provider: ProviderId): string {
-  return provider === "deepseek"
-    ? env.providers.deepseek.baseUrl
-    : env.providers.doubao.baseUrl;
+  if (provider === "deepseek") return env.providers.deepseek.baseUrl;
+  if (provider === "bailian") return env.providers.bailian.baseUrl;
+  return env.providers.doubao.baseUrl;
 }
 
 /* ------------------------------- BYOK ------------------------------- */

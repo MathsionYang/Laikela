@@ -210,7 +210,7 @@ export async function listAssets(
   orgId: string,
   opts: { limit?: number; kind?: string; jobId?: string; role?: string } = {},
 ): Promise<AssetRow[]> {
-  const limit = Math.min(opts.limit ?? 60, 200);
+  const limit = Math.min(opts.limit ?? 60, 1000);
   const where: string[] = ["org_id = $1"];
   const vals: unknown[] = [orgId];
   let i = 2;

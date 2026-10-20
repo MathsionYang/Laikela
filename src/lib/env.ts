@@ -64,6 +64,14 @@ export const env = {
    * 留空时页面显示「联系管理员获取」。
    */
   payment: {
+    /**
+     * 是否允许「mock 支付通道」（下单即置为已支付）。
+     *
+     * 默认**关闭**：线上绝不能出现「点一下套餐就到账」的假支付。
+     * 本机演示/自动化测试要跑通订阅流程时显式设 PAYMENT_MOCK=1。
+     * 关闭时开通套餐走「人工转账 → 管理员审核」（见 docs/PAYMENT-ACCESS.md）。
+     */
+    mock: process.env.PAYMENT_MOCK === "1",
     payee: process.env.PAY_PAYEE ?? "",
     wechat: process.env.PAY_WECHAT ?? "",
     alipay: process.env.PAY_ALIPAY ?? "",
@@ -96,12 +104,32 @@ export const env = {
     deepseek: {
       apiKey: process.env.DEEPSEEK_API_KEY ?? "",
       baseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-      model: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+      /**
+       * 默认值跟账号实际可用模型对齐（GET /models 实测）。
+       * 曾经默认写 deepseek-chat，而目录里跑的却是 deepseek-flash ——
+       * 名字对不上就会 400 model_not_found，且报错长得像「Key 坏了」。
+       */
+      model: process.env.DEEPSEEK_MODEL ?? "deepseek-flash",
     },
     doubao: {
       apiKey: process.env.DOUBAO_API_KEY ?? "",
       baseUrl: process.env.DOUBAO_BASE_URL ?? "https://ark.cn-beijing.volces.com/api/v3",
       model: process.env.DOUBAO_MODEL ?? "doubao-pro-32k",
+    },
+    /**
+     * 阿里百炼（专属网关走 compatible-mode）。
+     *
+     * 能力面经实测（docs/ALIYUN-BAILIAN-TEST.md）：
+     *   文本 ✅ / 出图 ✅ / 语音 ❌（网关未开放 /audio/*，TTS 型号额度用尽）
+     * 所以这里只配文本与出图两个模型，语音仍走本地音轨合成。
+     */
+    bailian: {
+      apiKey: process.env.BAILIAN_API_KEY ?? "",
+      baseUrl:
+        process.env.BAILIAN_BASE_URL ??
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      textModel: process.env.BAILIAN_TEXT_MODEL ?? "qwen3.8-flash",
+      imageModel: process.env.BAILIAN_IMAGE_MODEL ?? "qwen-image-2.1-turbo",
     },
     image: {
       apiKey: process.env.IMAGE_API_KEY ?? "",
@@ -115,6 +143,7 @@ export const env = {
     return Boolean(
       this.providers.deepseek.apiKey ||
         this.providers.doubao.apiKey ||
+        this.providers.bailian.apiKey ||
         this.providers.image.apiKey,
     );
   },

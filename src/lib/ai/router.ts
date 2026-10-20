@@ -9,6 +9,7 @@
  * 路由结果不缓存「Key」，只缓存目录视图（短 TTL），因为 Key 可能随时被改。
  */
 import { q, q1 } from "@/lib/db";
+import { modelNameOf } from "./model-name";
 import { ProviderError, type ProviderAdapter, type TextRequest, type TextResult } from "@/lib/gateway/types";
 import {
   MODEL_CATALOG,
@@ -70,7 +71,7 @@ export async function listModelViews(
     ProviderId,
     { apiKey: string; source: "byok" | "platform" | "none"; healthy: boolean }
   >();
-  for (const p of ["deepseek", "doubao"] as ProviderId[]) {
+  for (const p of ["deepseek", "doubao", "bailian"] as ProviderId[]) {
     providerKeys.set(p, await resolveKey(orgId, p));
   }
 
@@ -98,6 +99,9 @@ export async function listModelViews(
 
     return {
       ...spec,
+      // 页面要显示「真正发给供应商的名字」，否则改了 DEEPSEEK_MODEL 后
+      // 设置页还写着旧的 modelName，排障时会被界面误导。
+      modelName: modelNameOf(spec),
       // 运维可在库里覆盖单价与积分，代码里的值是默认值
       credits: m?.credits ?? spec.credits,
       enabled: on,
@@ -264,7 +268,7 @@ export function toTextAdapter(r: ResolvedModel, orgId: string): ProviderAdapter 
         const res = await chatCompletion({
           baseUrl: r.baseUrl,
           apiKey: r.apiKey,
-          model: spec.modelName,
+          model: modelNameOf(spec),
           label: `${spec.vendor} · ${spec.label}`,
           priceIn: spec.unitPrice,
           priceOut: spec.unitPrice * 2,

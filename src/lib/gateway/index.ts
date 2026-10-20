@@ -53,6 +53,10 @@ export interface CopyResult {
   model: string;
   /** 目录里的模型 key（deepseek-chat / doubao-pro-32k / local-text …） */
   modelKey: string;
+  /** 目录里的展示名（DeepSeek V4.1 Flash），和图片/音频分支的 output.model.label 对齐 */
+  modelLabel: string;
+  /** 真正发给供应商的模型 id（deepseek-flash），排障时用于区分内部 key 与上游名字 */
+  modelName: string;
   /** 这次是谁付的钱：platform（平台代付）| byok（用户自带 Key） */
   keySource: "byok" | "platform";
   usage: UsageCost;
@@ -196,6 +200,8 @@ export async function generateCopy(
           provider: res.provider,
           model: res.model,
           modelKey: resolved?.spec.key ?? adapter.id,
+          modelLabel: resolved?.spec.label ?? adapter.label,
+          modelName: res.model,
           keySource: resolved?.keySource ?? "platform",
           usage: res.usage,
           latencyMs: res.latencyMs,
@@ -216,9 +222,15 @@ export async function generateCopy(
   try {
     return await run(picked.adapter, picked.resolved, picked.reason);
   } catch (err) {
-    // 远端彻底失败 → 本地兜底，任务不失败，但把原因写进 degraded
+    // 远端彻底失败 → 本地兜底，任务不失败，但必须把「为什么没用上真模型」说清楚：
+    // 只写一句「调用失败」等于让用户自己猜是 Key、模型名还是网络的问题。
     if (picked.adapter.id === "local") throw err;
-    const why = `${picked.adapter.label} 调用失败（${(err as Error).message}），已用本地规则引擎生成`;
+    const code = err instanceof ProviderError ? err.code : "UNKNOWN";
+    const detail = (err as Error)?.message || String(err);
+    const why =
+      `${detail}（${code}）` +
+      `本次已回落到本地规则引擎生成，积分按本地模型重新结算；` +
+      `修好上面这条错误后重试即可走真实模型。`;
     return run(localProvider, null, why);
   }
 }

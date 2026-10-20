@@ -165,7 +165,7 @@ export async function startSubscription(params: {
   orgId: string;
   planCode: string;
   months?: number;
-  channel?: "mock" | "wechat" | "alipay" | "manual";
+  channel?: "mock" | "wechat" | "alipay" | "manual" | "system";
 }): Promise<{ subscription: Subscription; plan: Plan; orderNo: string; grantedCredits: number }> {
   const plan = await getPlan(params.planCode);
   if (!plan) throw new Error(`套餐不存在：${params.planCode}`);
@@ -192,8 +192,10 @@ export async function startSubscription(params: {
     );
     await c.query(
       `insert into orders (id, org_id, plan_code, amount_cny, months, status, channel, out_trade_no, paid_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,now())`,
-      [newId("ord"), params.orgId, plan.code, amount, months, amount > 0 ? "paid" : "paid", params.channel ?? "mock", orderNo],
+       values ($1,$2,$3,$4,$5,'paid',$6,$7,now())`,
+      // 走到这里说明钱已确认（mock 本机演示，或管理员审核通过的人工转账），
+      // 所以订单直接记 paid —— 之前写的是 `amount > 0 ? "paid" : "paid"`，两个分支一样，纯属占位。
+      [newId("ord"), params.orgId, plan.code, amount, months, params.channel ?? "manual", orderNo],
     );
     await c.query(`update organizations set plan = $2, quota_month = $3 where id = $1`, [
       params.orgId,

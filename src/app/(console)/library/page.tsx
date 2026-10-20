@@ -31,6 +31,9 @@ const FILTERS = [
   { key: "document", label: "文件" },
 ];
 
+/** 与 useAssets 的请求上限保持一致；超了就显式提示，不静默截断 */
+const PAGE_LIMIT = 1000;
+
 const KIND_ICON: Record<string, string> = {
   text: "doc",
   image: "image",
@@ -47,21 +50,25 @@ export default function LibraryPage() {
   const del = useDeleteAsset();
   const [zoom, setZoom] = useState<ClientAsset | null>(null);
   const [reading, setReading] = useState<{ asset: ClientAsset; body: string } | null>(null);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  /** 待删除的素材：点一下弹确认框，不再用「再点一次」的短暂时窗 */
+  const [pending, setPending] = useState<ClientAsset | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // 缩略图与时间轴 JSON 是附属产物：前者只作为卡片小图，后者只在「文件」里露出。
-  // 否则 191 张分镜 + 25 份 timeline.json 会把「全部」淹没。
-  const assets = useMemo(
-    () =>
-      (data ?? []).filter(
-        (a) => a.role !== "thumbnail" && (kind === "document" || a.role !== "metadata"),
-      ),
-    [data, kind],
-  );
+  // 缩略图是卡片小图，不进列表；时间轴 JSON 只在「文件」档露出。
+  // 「全部」只放成品（final / original）—— 分镜和时间轴属于任务的中间产物，
+  // 混进来会让同一个任务的 6 张关键帧占满一屏，看起来像重复素材。
+  const assets = useMemo(() => {
+    const rows = data ?? [];
+    if (kind === "document") return rows.filter((a) => a.role !== "thumbnail");
+    if (kind === "keyframe") return rows.filter((a) => a.role === "proxy");
+    if (kind) return rows.filter((a) => a.role !== "thumbnail" && a.role !== "metadata");
+    return rows.filter((a) => a.role === "final" || a.role === "original");
+  }, [data, kind]);
 
   const storage = health?.checks.find((c) => c.id === "storage");
   const localMode = Boolean(storage?.detail.startsWith("本地目录"));
+  // 一次拉满：素材库要「实际产出多少显示多少」，被静默截断比慢一点更难解释
+  const truncated = (data?.length ?? 0) >= PAGE_LIMIT;
 
   async function readText(asset: ClientAsset) {
     setReading({ asset, body: "加载中…" });
@@ -75,14 +82,18 @@ export default function LibraryPage() {
   }
 
   function remove(asset: ClientAsset) {
-    if (confirmId !== asset.id) {
-      setConfirmId(asset.id);
-      window.setTimeout(() => setConfirmId((id) => (id === asset.id ? null : id)), 3200);
-      return;
-    }
-    setConfirmId(null);
+    setPending(asset);
+  }
+
+  function confirmRemove() {
+    if (!pending) return;
+    const asset = pending;
     del.mutate(asset.id, {
-      onSuccess: (r) => setNotice(`已删除「${r.deleted.name}」，回收 ${r.deleted.files} 个文件`),
+      onSuccess: (r) => {
+        setPending(null);
+        setZoom((z) => (z?.id === asset.id ? null : z));
+        setNotice(`已删除「${r.deleted.name}」，回收 ${r.deleted.files} 个文件`);
+      },
       onError: (e) => setNotice(`删除失败：${e.message}`),
     });
   }
@@ -94,6 +105,7 @@ export default function LibraryPage() {
         <h1 className="serif text-[26px] leading-tight sm:text-[30px]">素材库</h1>
         <p className="text-[12px]" style={{ color: "var(--t3)" }}>
           文字、图片、音频、视频的生成结果都落在本地存储，可预览、可下载、可删除。
+          默认只列成品；分镜与时间轴在对应分档里。
           {localMode && (
             <span className="mono ml-1.5" style={{ opacity: 0.8 }}>
               {storage?.detail.replace("本地目录 ", "")}
@@ -120,6 +132,7 @@ export default function LibraryPage() {
         ))}
         <span className="mono ml-auto shrink-0 text-[10.5px]" style={{ color: "var(--t3)" }}>
           {assets.length} 项
+          {truncated && <span style={{ color: "#D98A85" }}> · 仅显示最近 {PAGE_LIMIT} 项</span>}
         </span>
       </div>
 
@@ -163,7 +176,6 @@ export default function LibraryPage() {
           <AssetCard
             key={a.id}
             asset={a}
-            confirming={confirmId === a.id}
             deleting={del.isPending && del.variables === a.id}
             onZoom={() => setZoom(a)}
             onRead={() => void readText(a)}
@@ -172,7 +184,81 @@ export default function LibraryPage() {
         ))}
       </div>
 
-      {zoom && <Lightbox asset={zoom} onClose={() => setZoom(null)} />}
+      {zoom && (
+        <Lightbox
+          asset={zoom}
+          onClose={() => setZoom(null)}
+          onDelete={() => {
+            setZoom(null);
+            remove(zoom);
+          }}
+        />
+      )}
+
+      {pending && (
+        <div
+          className="animate-fade fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(6,5,4,.84)" }}
+          onClick={() => (del.isPending ? null : setPending(null))}
+          role="dialog"
+          aria-modal="true"
+          aria-label="确认删除素材"
+        >
+          <div
+            className="card flex w-full max-w-[420px] flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-2.5">
+              <span
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
+                style={{ background: "rgba(192,80,74,.16)", color: "#D98A85" }}
+              >
+                <Icon name="trash" size={14} />
+              </span>
+              <div className="min-w-0">
+                <h2 className="serif text-[15px]">删除这个素材？</h2>
+                <p className="mono mt-0.5 truncate text-[11px]" style={{ color: "var(--t2)" }}>
+                  {pending.name}
+                </p>
+                <p className="mono mt-1 text-[10px]" style={{ color: "var(--t3)" }}>
+                  {pending.kind} · {fmtBytes(pending.bytes)} · {fmtDate(pending.createdAt)}
+                </p>
+              </div>
+            </div>
+            <p
+              className="rounded-[7px] px-2.5 py-2 text-[11px] leading-[1.7]"
+              style={{ background: "var(--surface-2)", color: "var(--t3)" }}
+            >
+              本地文件与缩略图会一并删除，
+              <span style={{ color: "#D98A85" }}>不可恢复</span>
+              。任务记录与积分流水不受影响。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                disabled={del.isPending}
+                onClick={() => setPending(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={del.isPending}
+                onClick={confirmRemove}
+                style={{
+                  background: "rgba(192,80,74,.18)",
+                  border: "1px solid rgba(192,80,74,.5)",
+                  color: "#D98A85",
+                }}
+              >
+                {del.isPending ? "删除中…" : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {reading && (
         <div
@@ -221,14 +307,12 @@ export default function LibraryPage() {
 
 function AssetCard({
   asset: a,
-  confirming,
   deleting,
   onZoom,
   onRead,
   onDelete,
 }: {
   asset: ClientAsset;
-  confirming: boolean;
   deleting: boolean;
   onZoom: () => void;
   onRead: () => void;
@@ -326,18 +410,21 @@ function AssetCard({
             type="button"
             onClick={onDelete}
             disabled={deleting}
-            aria-label={confirming ? `确认删除 ${a.name}` : `删除 ${a.name}`}
-            title={confirming ? "再点一次确认删除" : "删除"}
-            className="grid h-7 place-items-center rounded-[7px] text-[10px]"
+            aria-label={`删除 ${a.name}`}
+            title="删除"
+            className="grid h-7 w-7 place-items-center rounded-[7px]"
             style={{
-              paddingInline: confirming ? 8 : 0,
-              width: confirming ? "auto" : 28,
-              background: confirming ? "rgba(192,80,74,.16)" : "var(--surface)",
-              border: `1px solid ${confirming ? "rgba(192,80,74,.55)" : "var(--line-2)"}`,
-              color: confirming ? "#D98A85" : "var(--t2)",
+              background: "var(--surface)",
+              border: "1px solid var(--line-2)",
+              color: "var(--t2)",
+              cursor: deleting ? "progress" : "pointer",
             }}
           >
-            {confirming ? "确认删除" : <Icon name="trash" size={12} />}
+            {deleting ? (
+              <span className="mono text-[9px]">…</span>
+            ) : (
+              <Icon name="trash" size={12} />
+            )}
           </button>
         </div>
 
@@ -367,7 +454,15 @@ function AssetCard({
   );
 }
 
-function Lightbox({ asset, onClose }: { asset: ClientAsset; onClose: () => void }) {
+function Lightbox({
+  asset,
+  onClose,
+  onDelete,
+}: {
+  asset: ClientAsset;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
   return (
     <div
       className="animate-fade fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -388,6 +483,9 @@ function Lightbox({ asset, onClose }: { asset: ClientAsset; onClose: () => void 
         <a href={asset.downloadUrl} className="btn btn-quiet btn-sm">
           <Icon name="download" size={12} /> 下载
         </a>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onDelete}>
+          <Icon name="trash" size={12} /> 删除
+        </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
           关闭
         </button>

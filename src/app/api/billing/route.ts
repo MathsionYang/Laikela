@@ -1,5 +1,6 @@
 import { fail, ok, readJson } from "@/lib/api";
 import { ensureDb } from "@/lib/db";
+import { env } from "@/lib/env";
 import { requireSession } from "@/lib/session-api";
 import { billingOverview, cancelSubscription, resumeSubscription, startSubscription } from "@/lib/billing";
 import { audit } from "@/lib/jobs/repo";
@@ -22,15 +23,26 @@ export async function POST(req: Request) {
   if ("error" in guard) return guard.error;
   const session = guard.session;
 
-  const body = await readJson<{ planCode?: string; months?: number; channel?: "mock" | "wechat" | "alipay" }>(req);
+  const body = await readJson<{ planCode?: string; months?: number; channel?: "mock" | "wechat" | "alipay" | "manual" }>(req);
   if (!body.planCode) return fail("NO_PLAN", "请选择套餐", 422);
+
+  // 线上不允许「下单即到账」的假支付：mock 通道默认关闭。
+  // 微信/支付宝尚未接入，自助开通一律拒绝，引导走「人工转账 → 管理员审核」。
+  const channel = body.channel ?? "mock";
+  if (channel !== "mock" || !env.payment.mock) {
+    return fail(
+      "PAYMENT_NOT_READY",
+      "在线支付尚未接入。请在「充值」页提交人工转账单号，管理员核对到账后为你开通套餐并发放积分。",
+      409,
+    );
+  }
 
   try {
     const result = await startSubscription({
       orgId: session.orgId,
       planCode: body.planCode,
       months: body.months ?? 1,
-      channel: body.channel ?? "mock",
+      channel,
     });
     await audit({
       orgId: session.orgId,

@@ -226,7 +226,7 @@ export async function register(params: {
 
   // 新账号送免费版额度，进来就能跑通一条链路
   const { startSubscription } = await import("@/lib/billing");
-  await startSubscription({ orgId, planCode: "free", months: 1, channel: "mock" });
+  await startSubscription({ orgId, planCode: "free", months: 1, channel: "system" });
 
   return {
     id: userId,

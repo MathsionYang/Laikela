@@ -34,9 +34,10 @@ const PROTOCOL_LABEL: Record<string, string> = {
   local: "进程内调用",
 };
 
-const PROVIDERS: Array<{ id: "deepseek" | "doubao"; name: string; hint: string }> = [
+const PROVIDERS: Array<{ id: "deepseek" | "doubao" | "bailian"; name: string; hint: string }> = [
   { id: "deepseek", name: "DeepSeek", hint: "以 sk- 开头，在 platform.deepseek.com 创建" },
   { id: "doubao", name: "豆包 · 火山方舟", hint: "方舟控制台的 API Key，同时驱动文本 / 图像 / 视频 / 语音" },
+  { id: "bailian", name: "阿里百炼", hint: "百炼控制台的 sk- 开头 Key；本网关实测支持文本与出图，语音未开放" },
 ];
 
 export default function ModelsPage() {
@@ -154,7 +155,7 @@ function KeyCard({
   canManage,
   onNotice,
 }: {
-  provider: { id: "deepseek" | "doubao"; name: string; hint: string };
+  provider: { id: "deepseek" | "doubao" | "bailian"; name: string; hint: string };
   credential: CredentialPayload | null;
   platformReady: boolean;
   canManage: boolean;
