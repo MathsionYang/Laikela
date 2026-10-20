@@ -53,7 +53,7 @@ npm run build && npm start
 
 | 账号 | 口令 | 角色 | 初始状态 |
 | --- | --- | --- | --- |
-| `owner@laikela.local` | `laikela2026` | owner（空间管理员） | studio 套餐 · 29,900 积分/月 |
+| `owner@laikela.local` | `laikela2026` | owner（空间管理员） | studio 套餐 · 22,000 积分/月 |
 
 > **没装 Docker 也能跑。** `DB_DRIVER=auto` 先探 PostgreSQL，连不上自动降级 PGlite（嵌入式 Postgres/WASM）；
 > `QUEUE_DRIVER=auto` 同理，Redis 不可用时切进程内队列。功能完全一致，只是不适合多实例部署。
@@ -146,17 +146,21 @@ queued → running → post_processing → reviewing → succeeded
 计费口径（完整推导见 [`docs/PRICING.md`](docs/PRICING.md)）：
 
 ```
-1 积分 = 1 分钱；价格 = 模型官方成本 × (1 + 套餐服务费率)
+token 层：价格 = 模型官方成本 × (1 + 套餐服务费率)
+  平台代付 Key        → ceil(成本 × (1 + 费率))   费率 5% / 4.5% / 4% / 3%
+  自带 Key / 自定义端点 → ceil(成本 × 费率)         模型费用户直接付给厂商
+  最低扣分            → 1 积分（低于 1 分钱的交易财务上不可结算）
 
-平台代付 Key        → ceil(成本 × (1 + 费率))   费率 5% / 4.5% / 4% / 3%
-自带 Key / 自定义端点 → ceil(成本 × 费率)         模型费用户直接付给厂商
-本地模型            → 同上，成本按服务器摊销（0.01–0.02 元/次）
-最低扣分            → 1 积分（低于 1 分钱的交易财务上不可结算）
-失败 / 取消         → 全额退回，幂等
+套餐层：月费 = token 成本 + 固定成本（¥19.2/月）+ 利润
+  额度上限 = (月费 × 0.8 − 固定成本) ÷ 最坏每积分成本(0.957 分)
+  创作版 6,000 / 工作室 22,000 / 企业版 95,000 —— 额度用满也不亏
 ```
 
 成本取供应商官方牌价（DeepSeek V4 Flash 输入 1 元 / 输出 2 元每百万 token，豆包 Seed 2.1 Pro 6 / 30 元），
 `unitPrice` 写在 `src/lib/ai/catalog.ts`，费率写在 `src/lib/domain/pricing.ts`，两边都可独立调。
+**压力测试结论：三档套餐在「额度 100% 用满 + 全选最贵模型」下净利率 22%–23%。**
+
+失败 / 取消 → 全额退回，幂等。
 
 ### 订阅
 
