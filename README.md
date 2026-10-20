@@ -12,7 +12,7 @@
 ![Version](https://img.shields.io/badge/Version-v0.1.0-1D9E75?labelColor=0D0F12)
 ![License](https://img.shields.io/badge/License-MIT-D8A85E?labelColor=0D0F12)
 
-[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界) · [**许可**](#-license)
+[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**账号与充值**](#-账号额度与充值) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界) · [**许可**](#-license)
 
 ---
 
@@ -173,6 +173,50 @@ token 层：价格 = 模型官方成本 × (1 + 套餐服务费率)
 
 ---
 
+## 🧾 账号、额度与充值
+
+### 注册必须先过邮箱验证
+
+注册接口 `POST /api/auth/register` **只建账号、不发会话**，同时下发一封 6 位验证码邮件；`POST /api/auth/verify-email` 校验通过后才 `createSession`。未验证账号去登录，会拿到 `403 EMAIL_UNVERIFIED`，前端直接切到验证面板并自动补发一封。
+
+几个刻意的选择：
+
+- **用验证码，不用魔法链接。** 很多企业邮箱会预取邮件里的链接，一点就「帮别人验证了账号」；验证码没有这个问题，也不依赖公网域名可达。
+- **库里只存 HMAC 摘要。** 6 位数字空间只有 100 万，裸 sha256 离线可爆破，所以存 `HMAC-SHA256(serverSecret, userId:code)`。
+- **冷却与配额落库，不依赖 Redis。** 60 秒重发冷却、每小时 6 封上限、5 次错误即作废、15 分钟过期；旧码在发新码时立即作废，只认最新一封。
+- **没配 SMTP 也能跑通。** 走 `outbox` 驱动：正文落 `mail_outbox` 表并打到控制台；本机 `MAIL_DEBUG_CODE=1` 时接口会把码回传，生产环境即使忘了配 SMTP 也不会泄漏。
+- **存量账号不会被锁在门外。** 迁移给上线前的账号统一回填 `email_verified_at`（用 `app_settings` 打标记，只跑一次）。
+
+### 平台管理员：跨租户，与租户角色分开
+
+`users.is_admin` 才是平台管理员，和租户内的 `role`（owner/admin/member）不是一套东西。提权两条路：直接改库，或配 `ADMIN_EMAILS=a@x.com,b@y.com`（启动时自动提升，天然幂等）。演示账号 `owner@laikela.local` 默认就是管理员。
+
+`/admin` 页面分三档：
+
+| 分区 | 能做什么 |
+| --- | --- |
+| 运行状态 | 依赖探测、模型路由、工具目录、本月用量 |
+| 用户与额度 | 搜用户 → 直接调积分（±）、改套餐（含附加积分）、看余额/本月消耗/验证状态 |
+| 转账审核 | 待审转账单，通过时选套餐 + 补积分，驳回留原因 |
+
+每个动作都写 `admin_audit_log`：谁、对哪个租户、改了什么、为什么。
+
+### 人工转账：拿到商户号之前的正式通道
+
+个人主体拿不到微信/支付宝的收款 API（原因见 [`docs/PAYMENT-ACCESS.md`](docs/PAYMENT-ACCESS.md)），所以这条链路是**现在的正式通道**，不是临时补丁：
+
+```
+用户在 /billing 看到收款信息 → 转账 → 提交金额/单号/付款人
+        ↓  manual_payments(status=pending)
+管理员在 /admin 转账审核里核对流水 → 通过（选套餐 + 补积分）/ 驳回
+        ↓  条件更新 where status='pending'
+发放积分（幂等键 manual:<单号>:bonus）+ 变更订阅 + 写审计
+```
+
+防呆设计：同一笔转账单号不允许重复申报；单租户最多 3 笔待审；审核用条件更新，两个人同时点「通过」也只会发一次；发放用带单号的幂等键，重试不会重复入账。
+
+---
+
 ## 🔐 模型接入：三条路径
 
 这是本项目最需要说清楚的部分。**越靠下越即时生效**：
@@ -281,8 +325,11 @@ worker/index.ts               BullMQ 消费者入口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/auth/login` · `/register` · `/logout` | 认证 |
-| GET | `/api/auth/me` | 当前用户 + 组织 + 套餐 + 积分 |
+| POST | `/api/auth/login` · `/api/auth/logout` | 登录 / 登出 |
+| POST | `/api/auth/register` | 建账号并发验证码（**不发会话**），返回 `{pending, expiresAt}` |
+| POST | `/api/auth/verify-email` | 校验 6 位验证码，通过后才建会话 |
+| POST | `/api/auth/verify-email/resend` | 重发验证码（60 秒冷却、每小时上限） |
+| GET | `/api/auth/me` | 当前用户 + 组织 + 套餐 + 积分（含 `isAdmin`） |
 | GET | `/api/tools` | 工具目录 + 运行统计 |
 | POST | `/api/jobs` | 创建任务 `{tool, input, modelKey?}`，返回选定模型与扣费结果 |
 | GET | `/api/jobs/[id]` · `/events` | 任务详情 / SSE 进度 |
@@ -293,6 +340,14 @@ worker/index.ts               BullMQ 消费者入口
 | GET/POST/PATCH/DELETE | `/api/models/endpoints` | 自定义端点管理 |
 | POST | `/api/models/endpoints/test` | 真打一次最小请求验证连通性 |
 | GET/POST/PATCH | `/api/billing` | 订阅概览 / 开通 / 取消与恢复 |
+| GET/POST/PATCH | `/api/billing/manual-transfer` | 人工转账：我的申报 / 提交 / 撤销 |
+| GET | `/api/admin/overview` | 管理台统计 + 待审转账 + 最近审计 |
+| GET | `/api/admin/users` | 用户列表（按邮箱/称呼/空间名搜索） |
+| GET | `/api/admin/users/[id]` | 单用户快照：余额、套餐、最近流水、转账 |
+| POST | `/api/admin/users/[id]/credits` | 手动调额度 `{delta, reason}` |
+| POST | `/api/admin/users/[id]/plan` | 手动改套餐 `{planCode, months, bonusCredits?}` |
+| GET | `/api/admin/payments` | 转账申报列表（`status=pending/approved/rejected/all`） |
+| POST | `/api/admin/payments/[id]/review` | 审核 `{action: approve\|reject, ...}` |
 | GET | `/api/assets` · `/dashboard` · `/usage` | 素材 / 总览 / 用量 |
 | GET | `/api/health` | 数据库与队列驱动、连通性 |
 
@@ -304,11 +359,11 @@ worker/index.ts               BullMQ 消费者入口
 
 诚实列出，避免接手的人踩空：
 
-- **支付是演示通道。** `channel=mock`，点开通即写 `paid`。接微信支付要拆成「下单 → 回调验签 → 幂等激活」两阶段交割，当前 `startSubscription()` 是单事务一把梭，需重构。个人主体接入的可行性、主体门槛与通道选型见 [`docs/PAYMENT-ACCESS.md`](docs/PAYMENT-ACCESS.md)。
+- **在线支付未接，当前收款走人工转账。** `POST /api/billing` 的 mock 通道点开通即写 `paid`（仅演示用）；真实收款链路是「用户转账 → 提交单号 → 管理员核对 → 发额度」（见上文「人工转账」）。接微信/支付宝要拆成「下单 → 回调验签 → 幂等激活」两阶段交割，当前 `startSubscription()` 是单事务一把梭，需重构。个人主体接入的可行性、主体门槛与通道选型见 [`docs/PAYMENT-ACCESS.md`](docs/PAYMENT-ACCESS.md)。
 - **真实云端模型未联调。** 本地引擎与 mock OpenAI 端点已端到端验证；真实 DeepSeek / 豆包 Key 未配置，故 401/429/5xx 映射、Seedance 异步任务轮询、TTS 真实音色均未在真实厂商环境验证。
 - **视频不做本地 mp4 编码。** 本机无 FFmpeg，输出为「分镜关键帧 + `timeline.json` 时间轴 + 云端成片（Seedance 可用时）」。
 - **自定义端点只支持 `text` 与 `image`。** `video` / `audio` 需厂商专有协议，走内置目录。
-- **无邮箱验证、无找回密码。** 会话有效期 7 天，过期需重新登录。
+- **没有找回密码。** 注册有邮箱验证（验证码 + 冷却 + 次数上限），但「忘记密码」还没做，目前只能由管理员在库里重置。补这条链路时可以直接复用 `email_verifications` 表（`purpose='reset'` 字段已留位）。
 - **无成员邀请与角色管理 UI。** `owner` / `admin` / `member` 角色枚举已存在，只有 owner 能改模型凭证。
 - **`next dev` 下 React hydration 有 HMR 握手问题**（Turbopack websocket），`next start` 正常，不影响交付。
 - **无单元测试与 CI。** 验证方式是端到端探针脚本，未沉淀成测试用例。

@@ -1,14 +1,36 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { useHealth, useModels, useTools, useUsage } from "@/lib/client/api";
+import { useHealth, useMe, useModels, useTools, useUsage } from "@/lib/client/api";
+import { AdminUsers } from "./AdminUsers";
+import { AdminPayments } from "./AdminPayments";
+
+type Tab = "runtime" | "users" | "payments";
 
 export default function AdminPage() {
   const { data: health, refetch, isFetching } = useHealth();
   const { data: tools } = useTools();
   const { data: usage } = useUsage();
   const { data: models } = useModels();
+  const { data: me } = useMe();
+  const [tab, setTab] = useState<Tab>("runtime");
+
+  // 平台管理员才能看：这里做一层前端提示，真正的拦截在每一个 /api/admin/* 里
+  if (me && me.user && !me.user.isAdmin) {
+    return (
+      <div className="card p-6">
+        <div className="eyebrow mb-2">FORBIDDEN</div>
+        <h1 className="serif text-[22px]">需要平台管理员权限</h1>
+        <p className="mt-2 text-[12px] leading-relaxed" style={{ color: "var(--t3)" }}>
+          这个页面跨租户，只有平台管理员能打开。把账号邮箱加进{" "}
+          <code className="mono">ADMIN_EMAILS</code> 环境变量并重启，或直接在库里把{" "}
+          <code className="mono">users.is_admin</code> 置为 true。
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -17,20 +39,47 @@ export default function AdminPage() {
           <div className="eyebrow">ADMIN</div>
           <h1 className="serif text-[26px] leading-tight sm:text-[30px]">管理台</h1>
           <p className="text-[12px]" style={{ color: "var(--t3)" }}>
-            依赖状态、模型路由、工具开关与用量。所有配置都走环境变量，不写死在代码里。
+            用户与额度、转账审核、依赖状态。所有配置都走环境变量，不写死在代码里。
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => void refetch()}
-          disabled={isFetching}
-        >
-          <Icon name="refresh" size={12} />
-          {isFetching ? "检测中…" : "重新检测"}
-        </button>
+        {tab === "runtime" && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            <Icon name="refresh" size={12} />
+            {isFetching ? "检测中…" : "重新检测"}
+          </button>
+        )}
       </div>
 
+      <div className="seg w-full max-w-[420px]" role="tablist" aria-label="管理台分区">
+        {([
+          ["runtime", "运行状态"],
+          ["users", "用户与额度"],
+          ["payments", "转账审核"],
+        ] as Array<[Tab, string]>).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            data-on={tab === key ? "1" : undefined}
+            onClick={() => setTab(key)}
+            className="flex-1"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "users" && <AdminUsers />}
+      {tab === "payments" && <AdminPayments />}
+
+      {tab === "runtime" && (
+        <>
       {/* 依赖 */}
       <section className="card p-4 lg:p-5">
         <h2 className="serif mb-3 text-[15px]">运行依赖</h2>
@@ -191,6 +240,8 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

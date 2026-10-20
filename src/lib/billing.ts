@@ -165,7 +165,7 @@ export async function startSubscription(params: {
   orgId: string;
   planCode: string;
   months?: number;
-  channel?: "mock" | "wechat" | "alipay";
+  channel?: "mock" | "wechat" | "alipay" | "manual";
 }): Promise<{ subscription: Subscription; plan: Plan; orderNo: string; grantedCredits: number }> {
   const plan = await getPlan(params.planCode);
   if (!plan) throw new Error(`套餐不存在：${params.planCode}`);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
+import { ManualTransfer } from "./ManualTransfer";
 import {
   useBilling,
   useSubscribe,
@@ -76,6 +77,8 @@ export default function BillingPage() {
           </section>
 
           <PlanGrid data={data} onNotice={setNotice} />
+
+          <ManualTransfer />
 
           <LedgerTable entries={data.ledger} />
         </>

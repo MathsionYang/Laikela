@@ -219,6 +219,8 @@ async function runEnsureDb() {
   const schemaPath = path.join(process.cwd(), "src/lib/db/schema.sql");
   const sql = readFileSync(schemaPath, "utf8");
   await (await db()).exec(sql);
+  const { runMigrations } = await import("@/lib/db/migrations");
+  await runMigrations();
   const { seedAll } = await import("@/lib/db/seed");
   await seedAll();
 }

@@ -29,6 +29,49 @@ export const env = {
    */
   credentialSecret: process.env.CREDENTIAL_SECRET ?? "",
 
+  /**
+   * 发信。未配 SMTP_HOST 时走 outbox 驱动：邮件正文落 mail_outbox 表并打到控制台，
+   * 本机不需要真实邮箱也能把「注册 → 收码 → 验证」跑通。
+   */
+  mail: {
+    driver: (process.env.MAIL_DRIVER ?? (process.env.SMTP_HOST ? "smtp" : "outbox")) as
+      | "smtp"
+      | "outbox",
+    from: process.env.MAIL_FROM ?? "来客啦 <no-reply@laikela.local>",
+    smtp: {
+      host: process.env.SMTP_HOST ?? "",
+      /** 465 走 implicit TLS，587 走 STARTTLS */
+      port: num(process.env.SMTP_PORT, 465),
+      secure: process.env.SMTP_SECURE !== "0",
+      user: process.env.SMTP_USER ?? "",
+      pass: process.env.SMTP_PASS ?? "",
+    },
+  },
+
+  /** 注册邮箱验证。REQUIRE_EMAIL_VERIFY=0 可整体关掉（内部部署/自用机） */
+  verify: {
+    required: process.env.REQUIRE_EMAIL_VERIFY !== "0",
+    ttlMinutes: num(process.env.VERIFY_TTL_MINUTES, 15),
+    maxAttempts: num(process.env.VERIFY_MAX_ATTEMPTS, 5),
+    resendCooldownSec: num(process.env.VERIFY_RESEND_COOLDOWN, 60),
+    /** 每小时同一邮箱最多发几次，防止被当短信炮台 */
+    hourlyCap: num(process.env.VERIFY_HOURLY_CAP, 6),
+  },
+
+  /**
+   * 人工转账的收款信息。个人主体拿不到收款 API 时的过渡形态
+   * （见 docs/PAYMENT-ACCESS.md）：页面展示这些信息，用户转完提交单号，管理员后台核对。
+   * 留空时页面显示「联系管理员获取」。
+   */
+  payment: {
+    payee: process.env.PAY_PAYEE ?? "",
+    wechat: process.env.PAY_WECHAT ?? "",
+    alipay: process.env.PAY_ALIPAY ?? "",
+    bank: process.env.PAY_BANK ?? "",
+    contact: process.env.PAY_CONTACT ?? "",
+    note: process.env.PAY_NOTE ?? "转账时请备注你的注册邮箱，方便对账；到账后管理员在后台确认并发放额度。",
+  },
+
   storage: {
     // 默认用本地目录（零额外依赖）；需要 S3 形态时改成 s3 并启动 MinIO
     driver: (process.env.STORAGE_DRIVER ?? "local") as "s3" | "local",

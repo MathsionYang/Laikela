@@ -214,6 +214,7 @@ export interface MePayload {
     name: string;
     role: string;
     avatarHue: number;
+    isAdmin?: boolean;
   } | null;
   org?: { id: string; name: string; plan: string };
   plan?: PlanPayload | null;
@@ -470,5 +471,220 @@ export function useTestEndpoint() {
   return useMutation({
     mutationFn: (vars: { id?: string; baseUrl?: string; modelName?: string; apiKey?: string }) =>
       apiPost<TestResultPayload>("/api/models/endpoints/test", vars),
+  });
+}
+
+/* ------------------------------ 人工转账（用户侧） ------------------------------ */
+
+export interface ManualClaim {
+  id: string;
+  plan_code: string | null;
+  months: number;
+  amount_cny: string;
+  channel: "wechat" | "alipay" | "bank";
+  payer_name: string | null;
+  transfer_no: string | null;
+  note: string | null;
+  proof_url: string | null;
+  status: "pending" | "approved" | "rejected" | "canceled";
+  credits_granted: number;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+}
+
+export interface PayToPayload {
+  payee: string;
+  wechat: string;
+  alipay: string;
+  bank: string;
+  contact: string;
+  note: string;
+}
+
+export interface ManualTransferPayload {
+  claims: ManualClaim[];
+  plans: PlanPayload[];
+  payTo: PayToPayload;
+}
+
+export const useManualTransfer = () =>
+  useQuery({
+    queryKey: ["manual-transfer"],
+    queryFn: () => apiGet<ManualTransferPayload>("/api/billing/manual-transfer"),
+  });
+
+export function useSubmitTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      amountCny: number;
+      channel: "wechat" | "alipay" | "bank";
+      planCode?: string;
+      months?: number;
+      payerName?: string;
+      transferNo?: string;
+      note?: string;
+      proofUrl?: string;
+    }) => apiPost<{ claim: ManualClaim }>("/api/billing/manual-transfer", vars),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["manual-transfer"] });
+    },
+  });
+}
+
+export function useCancelTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      request<{ canceled: boolean }>("/api/billing/manual-transfer", {
+        method: "PATCH",
+        body: JSON.stringify({ id }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["manual-transfer"] });
+    },
+  });
+}
+
+/* ------------------------------ 管理员 ------------------------------ */
+
+export interface AdminUserRow {
+  userId: string;
+  email: string;
+  name: string;
+  role: string;
+  isAdmin: boolean;
+  verified: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  orgId: string;
+  orgName: string;
+  planCode: string;
+  planName: string;
+  periodEnd: string | null;
+  autoRenew: boolean;
+  balance: number;
+  consumedThisMonth: number;
+  pendingPayments: number;
+}
+
+export interface AdminClaimRow extends ManualClaim {
+  org_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  org_name: string;
+  reviewed_by: string | null;
+}
+
+export interface AdminAuditRow {
+  id: string;
+  actor_email: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AdminOverviewPayload {
+  stats: {
+    users: number;
+    verifiedUsers: number;
+    orgs: number;
+    pendingPayments: number;
+    pendingAmount: number;
+    creditsToday: number;
+    gmvThisMonth: number;
+  };
+  audit: AdminAuditRow[];
+  pending: AdminClaimRow[];
+}
+
+export const useAdminOverview = () =>
+  useQuery({
+    queryKey: ["admin-overview"],
+    queryFn: () => apiGet<AdminOverviewPayload>("/api/admin/overview"),
+  });
+
+export const useAdminUsers = (keyword: string) =>
+  useQuery({
+    queryKey: ["admin-users", keyword],
+    queryFn: () =>
+      apiGet<{ rows: AdminUserRow[]; total: number }>(
+        `/api/admin/users?q=${encodeURIComponent(keyword)}`,
+      ),
+  });
+
+export const useAdminPayments = (status: string) =>
+  useQuery({
+    queryKey: ["admin-payments", status],
+    queryFn: () =>
+      apiGet<{ rows: AdminClaimRow[] }>(
+        `/api/admin/payments?status=${encodeURIComponent(status)}`,
+      ),
+  });
+
+function invalidateAdmin(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["admin-overview"] });
+  void qc.invalidateQueries({ queryKey: ["admin-users"] });
+  void qc.invalidateQueries({ queryKey: ["admin-payments"] });
+  void qc.invalidateQueries({ queryKey: ["billing"] });
+  void qc.invalidateQueries({ queryKey: ["me"] });
+  void qc.invalidateQueries({ queryKey: ["manual-transfer"] });
+}
+
+export function useAdjustCredits() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: string; delta: number; reason: string }) =>
+      apiPost<{ balance: number; delta: number }>(
+        `/api/admin/users/${encodeURIComponent(vars.userId)}/credits`,
+        { delta: vars.delta, reason: vars.reason },
+      ),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useChangePlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      userId: string;
+      planCode: string;
+      months?: number;
+      bonusCredits?: number;
+      reason?: string;
+    }) =>
+      apiPost<{ planCode: string; granted: number; bonus: number }>(
+        `/api/admin/users/${encodeURIComponent(vars.userId)}/plan`,
+        {
+          planCode: vars.planCode,
+          months: vars.months,
+          bonusCredits: vars.bonusCredits,
+          reason: vars.reason,
+        },
+      ),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useReviewPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      action: "approve" | "reject";
+      planCode?: string | null;
+      months?: number;
+      bonusCredits?: number;
+      note?: string;
+    }) =>
+      apiPost<{ status: string; creditsGranted: number }>(
+        `/api/admin/payments/${encodeURIComponent(vars.id)}/review`,
+        vars,
+      ),
+    onSuccess: () => invalidateAdmin(qc),
   });
 }

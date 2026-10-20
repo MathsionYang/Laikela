@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     });
     return ok({ user });
   } catch (err) {
-    if (err instanceof AuthError) return fail(err.code, err.message, err.status);
+    if (err instanceof AuthError) return fail(err.code, err.message, err.status, err.detail);
     console.error("[auth/login]", err);
     return fail("INTERNAL", "登录失败，请稍后再试", 500);
   }

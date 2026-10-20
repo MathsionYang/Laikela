@@ -294,11 +294,19 @@ async function seedAccountAndPlans() {
   }
   if (!user) {
     await q(
-      `insert into users (id, org_id, email, name, role, avatar_hue, password_hash)
-       values ($1,$2,$3,$4,'owner',38,$5) on conflict (id) do nothing`,
+      `insert into users (id, org_id, email, name, role, avatar_hue, password_hash, email_verified_at)
+       values ($1,$2,$3,$4,'owner',38,$5, now()) on conflict (id) do nothing`,
       [DEMO_USER_ID, DEMO_ORG_ID, "owner@laikela.local", "林小满", hashPassword(DEMO_PASSWORD)],
     );
+  } else {
+    // 演示账号永远可用：它出生在验证流程之前，不该被锁在门外
+    await q(`update users set email_verified_at = coalesce(email_verified_at, now()) where id = $1`, [
+      DEMO_USER_ID,
+    ]);
   }
+
+  // 演示账号同时是平台管理员，方便直接打开 /admin 看用户与转账审核
+  await q(`update users set is_admin = true where id = $1 and is_admin = false`, [DEMO_USER_ID]);
 
   // ---- 套餐目录 ----
   for (const p of DEMO_PLANS) {

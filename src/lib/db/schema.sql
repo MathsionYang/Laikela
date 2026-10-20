@@ -401,3 +401,84 @@ CREATE TABLE IF NOT EXISTS model_endpoints (
   updated_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_endpoints_org ON model_endpoints(org_id, created_at DESC);
+
+-- ============================================================
+-- 邮箱验证（注册闭环）
+--   1. users.email_verified_at 为 null = 未验证；存量账号由代码侧一次性回填
+--   2. 验证码只存 HMAC 摘要，明文只在发信那一刻存在内存里
+--   3. 冷却与失败次数都落在行上，不依赖 Redis，单机/多实例都成立
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id           text PRIMARY KEY,
+  user_id      text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email        text NOT NULL,
+  purpose      text NOT NULL DEFAULT 'register',   -- register | reset（复位留位）
+  code_hash    text NOT NULL,
+  attempts     integer NOT NULL DEFAULT 0,
+  consumed_at  timestamptz,
+  expires_at   timestamptz NOT NULL,
+  ip           text,
+  user_agent   text,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_verif_user ON email_verifications(user_id, purpose, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verif_email ON email_verifications(email, created_at DESC);
+
+-- 发信留痕：outbox 驱动（未配 SMTP）时正文与验证码落这里，方便本机调试与事后追查
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  id           text PRIMARY KEY,
+  to_addr      text NOT NULL,
+  subject      text NOT NULL,
+  body         text NOT NULL,
+  driver       text NOT NULL DEFAULT 'outbox',     -- smtp | outbox
+  message_id   text,
+  error        text,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_created ON mail_outbox(created_at DESC);
+
+-- ============================================================
+-- 平台管理员 + 人工转账充值
+--   is_admin 与租户内的 role（owner/admin/member）是两套东西：
+--   前者跨租户，能看所有用户、调额度和套餐、审转账；后者只管自己那一间工作空间。
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_users_admin ON users(is_admin) WHERE is_admin = true;
+
+-- 人工转账认领单：用户线下转账后提交凭证，管理员核对通过才发额度
+CREATE TABLE IF NOT EXISTS manual_payments (
+  id             text PRIMARY KEY,
+  org_id         text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id        text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_code      text,                                  -- null = 只充值积分，不动套餐
+  months         integer NOT NULL DEFAULT 1,
+  amount_cny     numeric(10,2) NOT NULL,
+  channel        text NOT NULL DEFAULT 'wechat',        -- wechat | alipay | bank
+  payer_name     text,                                  -- 付款人（可能与注册名不同）
+  transfer_no    text,                                  -- 转账单号 / 交易流水号
+  note           text,
+  proof_url      text,                                  -- 付款截图（本地存储的签名 URL）
+  status         text NOT NULL DEFAULT 'pending',       -- pending | approved | rejected | canceled
+  credits_granted integer NOT NULL DEFAULT 0,
+  reviewed_by    text,
+  reviewed_at    timestamptz,
+  review_note    text,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_manual_pay_org ON manual_payments(org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_manual_pay_status ON manual_payments(status, created_at DESC);
+
+-- 管理员操作审计：改额度、改套餐、审单，全部留痕（谁、对谁、改了什么、为什么）
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id           text PRIMARY KEY,
+  actor_id     text NOT NULL,
+  actor_email  text NOT NULL DEFAULT '',
+  action       text NOT NULL,                           -- credits.adjust | plan.change | payment.approve | payment.reject
+  target_type  text NOT NULL DEFAULT 'org',             -- org | user | payment
+  target_id    text NOT NULL DEFAULT '',
+  detail       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log(created_at DESC);
