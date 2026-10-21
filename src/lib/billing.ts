@@ -9,7 +9,13 @@
  * `payOrder()` 换成微信支付/支付宝下单，并由支付回调调用 `fulfillOrder()`。
  */
 import { newId, q, q1, tx } from "@/lib/db";
-import { grant, summary as creditSummary, type LedgerRow, ledger } from "@/lib/credits";
+import {
+  grant,
+  topUpMonthly,
+  summary as creditSummary,
+  type LedgerRow,
+  ledger,
+} from "@/lib/credits";
 
 export interface PlanRow {
   code: string;
@@ -204,13 +210,14 @@ export async function startSubscription(params: {
     ]);
   });
 
-  // 积分按「自然月」发放：同一租户一个月只发一次，
-  // 所以中途换套餐不会重复拿积分（防止反复升降级刷额度），下个月按新套餐发。
-  const granted = await grant({
+  // 积分按「自然月应得总额」发放：本月已发多少就补多少差额。
+  // 这样 free(200) 升 enterprise(95,000) 能拿到剩下的 94,800，
+  // 而同月反复升降级因为「已发已达目标」不会重复拿（防刷额度）。
+  const topup = await topUpMonthly({
     orgId: params.orgId,
-    credits: plan.monthlyCredits,
+    target: plan.monthlyCredits,
     reason: `${plan.name} · ${monthLabel(now)} 订阅发放`,
-    key: `grant:${params.orgId}:${monthKey(now)}`,
+    key: `grant:${params.orgId}:${monthKey(now)}:${plan.code}`,
     meta: { planCode: plan.code, orderNo, months },
   });
 
@@ -219,7 +226,7 @@ export async function startSubscription(params: {
     subscription: subscription as Subscription,
     plan,
     orderNo,
-    grantedCredits: granted.applied ? plan.monthlyCredits : 0,
+    grantedCredits: topup.granted,
   };
 }
 

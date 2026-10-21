@@ -122,7 +122,7 @@ export function AdminUsers() {
         <p className="mt-2 text-[10.5px] leading-relaxed" style={{ color: "var(--t3)" }}>
           余额来自积分账本的 <code className="mono">sum(delta)</code>，不存冗余字段；调额度会写一条{" "}
           <code className="mono">adjust/grant</code> 流水并记审计。套餐的月度积分按自然月发放，
-          同月内重复开通不会重复发放 —— 要额外补额请填「附加积分」。
+          同月内换套餐只补差额（已发已达新套餐额度就不再发），要额外赠送请填「附加积分」。
         </p>
       </section>
     </div>

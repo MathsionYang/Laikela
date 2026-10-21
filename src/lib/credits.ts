@@ -113,6 +113,55 @@ export async function grant(params: {
 }
 
 /**
+ * 把「本自然月已发放的额度」补到目标值。
+ *
+ * 语义是**应得总额**，不是「每开一次套餐各发一份」：
+ *   · 体验版（200）中途升企业版（95,000）：已发 200 → 补 94,800；
+ *   · 同月再来回切：已发已达 95,000 → 差额 0，一分不发（防刷额度）；
+ *   · 降级：差额为负 → 不发也不扣，下个月按新套餐发。
+ *
+ * 之所以要有这个函数：原先 `startSubscription` 直接调 `grant` 并用
+ * `grant:{org}:{月}` 做幂等键，本意是防反复升降级刷额度，副作用是
+ * 「本月已经用 free 发过 200」会被当成整月已发过，升级企业版时 95,000 被
+ * 静默跳过 —— 用户看到的就是「后台已经调成企业套餐，界面还是 200 积分」。
+ *
+ * 读已发额度必须在锁内，否则两个并发请求会各自看到旧值、各补一份。
+ */
+export async function topUpMonthly(params: {
+  orgId: string;
+  /** 本月该拿到的总额度（套餐的 monthlyCredits） */
+  target: number;
+  reason: string;
+  key: string;
+  meta?: Record<string, unknown>;
+}): Promise<{ balance: number; granted: number; already: number }> {
+  return tx(async (c) => {
+    await lockOrg(c, params.orgId);
+    const before = await balanceOf(c, params.orgId);
+    const rows = await c.query<{ granted: string }>(
+      `select coalesce(sum(delta), 0)::text as granted
+         from credit_ledger
+        where org_id = $1 and kind = 'grant' and created_at >= date_trunc('month', now())`,
+      [params.orgId],
+    );
+    const already = Number(rows[0]?.granted ?? 0);
+    const gap = Math.floor(params.target - already);
+    if (gap <= 0) return { balance: before, granted: 0, already };
+
+    const applied = await writeEntry(c, {
+      orgId: params.orgId,
+      kind: "grant",
+      delta: gap,
+      balanceAfter: before + gap,
+      reason: params.reason,
+      key: params.key,
+      meta: params.meta,
+    });
+    return { balance: applied ? before + gap : before, granted: applied ? gap : 0, already };
+  });
+}
+
+/**
  * 扣减：建任务前调用。
  * 余额不足返回 ok:false（由调用方转成 402），不做负数余额。
  */
