@@ -20,7 +20,9 @@
     "check:margin": "tsx scripts/check-margin.ts",
     "check:ai": "tsx scripts/check-ai.ts",
     "assets:dedupe": "tsx scripts/dedupe-assets.ts",
-    "assets:gc": "tsx scripts/clean-orphans.ts"
+    "assets:gc": "tsx scripts/clean-orphans.ts",
+    "check:json": "tsx scripts/check-json.ts",
+    "fix:plan-gap": "tsx scripts/fix-plan-gap.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

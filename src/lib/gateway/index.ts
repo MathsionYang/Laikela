@@ -2,6 +2,7 @@ import { env } from "@/lib/env";
 import { PROMPTS } from "@/lib/domain/prompts";
 import { coerceBlocks, blocksToPlain, type Block } from "@/lib/domain/blocks";
 import type { ToolDef } from "@/lib/domain/tools";
+import { parseLooseJson } from "@/lib/ai/json-repair";
 import { localProvider } from "./local";
 import { openAiCompat } from "./openai-compat";
 import { ProviderError, type ProviderAdapter, type UsageCost } from "./types";
@@ -68,28 +69,46 @@ export interface CopyResult {
   degraded: string | null;
 }
 
-const stripFence = (s: string) =>
-  s
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-function extractJson(raw: string): unknown {
-  const text = stripFence(raw);
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(text.slice(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
+/**
+ * 解析失败时的报错。三种情况要分开说，否则用户只能看到一句「不是预期的结构」：
+ *   - 被截断（finish=length）：让他调上限或让输出短一点；
+ *   - 模型压根没按 JSON 写：把开头 120 字回显出来，一眼看出是「好的，以下是……」；
+ *   - 括号写错且修不好：说明是语法问题。
+ */
+function badJsonMessage(
+  label: string,
+  res: { text: string; finishReason?: string; maxTokens?: number },
+): string {
+  const head = res.text.replace(/\s+/g, " ").slice(0, 120);
+  if (res.finishReason === "length") {
+    return (
+      `${label} 的输出在 ${res.maxTokens ?? 8192} token 处被截断，JSON 没有写完` +
+      `（已产出 ${res.text.length} 字）。已自动重试一次；如果这条一直出现，` +
+      `把「输出数量 / 篇幅」调小一档，或调大 AI_MAX_OUTPUT_TOKENS 后重启进程。` +
+      `内容开头：${head}`
+    );
   }
+  return `${label} 返回的不是可用的 JSON 结构（已尝试修复括号，仍无法解析）。开头是：${head}`;
+}
+
+/**
+ * 重试时补的那句话必须跟着上一次的失败原因走：
+ * 被截断时该说「写短点」，语法错时才该说「只输出 JSON」。
+ * 一律用同一句「请严格只返回 JSON」对截断毫无帮助 —— 它本来就在写 JSON，只是没写完。
+ */
+function retryHint(code: string): string {
+  if (code === "TRUNCATED") {
+    return (
+      "\n\n注意：上一次输出写满长度上限被截断，JSON 没有闭合。" +
+      "这次请压缩篇幅：条目措辞更短、table 行数不超过 6 行、plain 只写要点，" +
+      "仍然只返回一个完整的 JSON 对象。"
+    );
+  }
+  return (
+    "\n\n注意：上一次输出不是合法 JSON。这次请只返回一个 JSON 对象：" +
+    "不要 Markdown 代码块、不要任何解释文字；数组一律用 [ ] 闭合、对象用 { } 闭合，两者不要混写；" +
+    "字符串内部的换行用 \\n 转义，不要直接换行。"
+  );
 }
 
 /** 把结构化输入拼成语义清晰的 user prompt（字段名用中文标签，模型更好理解） */
@@ -170,30 +189,39 @@ export async function generateCopy(
   ): Promise<CopyResult> => {
     const baseUser = buildUserPrompt(tool, input);
     let lastErr: unknown = null;
+    /** 上一次为什么失败，决定重试时补哪句话（截断要压缩，语法错才要「只输出 JSON」） */
+    let lastCode = "";
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const res = await adapter.generateText({
           system: prompt,
-          user:
-            attempt === 1
-              ? baseUser
-              : `${baseUser}\n\n注意：上一次输出不是合法 JSON，请严格只返回 JSON 对象。`,
+          user: attempt === 1 ? baseUser : `${baseUser}${retryHint(lastCode)}`,
           json: adapter.id !== "local",
           temperature: attempt === 1 ? 0.7 : 0.2,
           signal: opts.signal,
         });
 
-        const parsed = extractJson(res.text);
-        const blocks = coerceBlocks(parsed);
+        // 先宽松解析：修正 ] / } 互写、截断后补齐括号；再用 coerceBlocks 校验结构。
+        // 模型「看起来像 JSON」但语法合法，是 json_object 模式的基本要求，不能直接假定。
+        const parsed = parseLooseJson(res.text);
+        const blocks = parsed ? coerceBlocks(parsed.value) : null;
+        const truncated = res.finishReason === "length";
+
         if (!blocks) {
-          lastErr = new ProviderError(
-            "BAD_JSON",
-            `${adapter.label} 返回内容不是预期的 JSON 结构`,
-            true,
-          );
+          lastCode = truncated ? "TRUNCATED" : "BAD_JSON";
+          lastErr = new ProviderError(lastCode, badJsonMessage(adapter.label, res), true);
           continue;
         }
+
+        // 截断后靠补括号才解析出来的，只是「前半份」：先重试一次拿完整版，
+        // 第二次还截断就认了 —— 半份真模型产出也强过整份规则引擎。
+        if (truncated && attempt === 1) {
+          lastCode = "TRUNCATED";
+          lastErr = new ProviderError("TRUNCATED", badJsonMessage(adapter.label, res), true);
+          continue;
+        }
+
         return {
           blocks,
           plain: blocksToPlain(blocks),
@@ -211,7 +239,11 @@ export async function generateCopy(
         };
       } catch (err) {
         lastErr = err;
-        if (err instanceof ProviderError && !err.retryable) break;
+        if (err instanceof ProviderError) {
+          lastCode = err.code;
+          // 鉴权/额度这类错误重试也不会变好，直接交给外层降级
+          if (!err.retryable) break;
+        }
       }
     }
 

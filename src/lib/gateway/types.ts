@@ -24,6 +24,10 @@ export interface TextResult {
   latencyMs: number;
   /** 是否由本地规则引擎产出（未配置密钥时） */
   local: boolean;
+  /** 上游 finish_reason。length = 写满 max_tokens 被截断，stop = 正常收尾 */
+  finishReason?: string;
+  /** 本次实际使用的输出上限，报错时用来告诉用户「卡在哪个数字上」 */
+  maxTokens?: number;
 }
 
 export interface ProviderAdapter {

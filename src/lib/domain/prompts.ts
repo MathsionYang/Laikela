@@ -3,22 +3,36 @@
  * 任务会记录 prompt_version，保证任何一次生成都能追溯到当时用的提示词。
  */
 
-export const PROMPT_VERSION = "v1.2";
+export const PROMPT_VERSION = "v1.3";
 
+/**
+ * 这段约束是踩坑换来的，别删：
+ *
+ * - json_object 模式只保证「像 JSON」，不保证语法合法。实测 10 条追爆脚本的
+ *   多行 table 里，模型会把某一行的 `]` 写成 `}`，整份 JSON 直接解析失败。
+ * - 表格 rows 是「数组的数组」，但模型容易写成对象数组（`[{"镜号":"1"}]`），
+ *   下游 coerceBlocks 就取不到列。
+ * - 字符串里裸换行会让 JSON.parse 报 Unterminated string。
+ */
 const JSON_RULE = `
 【输出要求】
-只输出一个 JSON 对象，不要 Markdown 代码块、不要解释文字。
+只输出一个 JSON 对象，不要 Markdown 代码块、不要解释文字、不要在 JSON 前后写任何句子。
 JSON 结构：
 {
   "blocks": [
     { "kind": "headline", "text": "一句话主张" },
     { "kind": "list", "title": "小标题", "items": ["条目", "条目"] },
     { "kind": "text", "title": "小标题", "text": "段落正文" },
-    { "kind": "table", "title": "小标题", "columns": ["列名"], "rows": [["单元格"]] },
+    { "kind": "table", "title": "小标题", "columns": ["列名"], "rows": [["单元格", "单元格"]] },
     { "kind": "quote", "text": "可直接使用的一句话" }
   ],
   "plain": "整篇纯文本版本"
 }
+硬性约束：
+1. 数组用 [ ] 闭合、对象用 { } 闭合，绝不能用 } 去闭合一个 [ ——这是最容易写错的地方。
+2. table 的 rows 必须是「数组的数组」（[["a","b"],["c","d"]]），不要写成对象数组。
+3. 字符串内部不要出现裸换行或裸双引号：换行写成 \\n，双引号写成 \\"。
+4. 整份 JSON 必须一次写完整；宁可条目少一点、句子短一点，也不要写到一半就结束。
 `.trim();
 
 export const PROMPTS: Record<string, string> = {

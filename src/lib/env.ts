@@ -138,6 +138,19 @@ export const env = {
     },
   },
 
+  ai: {
+    /**
+     * 单次调用允许生成的最大 token 数。
+     *
+     * 原来的 2200 是凭空拍的：表格类工具（一键追爆 10 条、视频反推分镜表）
+     * 实测要 3000–5000 token，写到这里就断在半句，JSON 没闭合，
+     * 上层把「被截断」误报成「返回内容不是预期的 JSON 结构（BAD_JSON）」。
+     * DeepSeek V4.1 Flash 单次上限 39 万 token，8192 足够；
+     * 用不完不产生费用（按实际生成量计费）。
+     */
+    maxOutputTokens: Math.max(1024, num(process.env.AI_MAX_OUTPUT_TOKENS, 8192)),
+  },
+
   /** 无任何供应商密钥时，全部走本地确定性 Provider，界面会显式标注 */
   get hasCloudProvider() {
     return Boolean(

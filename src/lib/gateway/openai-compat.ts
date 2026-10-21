@@ -1,3 +1,4 @@
+import { env } from "@/lib/env";
 import { ProviderError, type ProviderAdapter, type TextRequest, type TextResult } from "./types";
 
 interface CompatOptions {
@@ -45,7 +46,7 @@ export function openAiCompat(opts: CompatOptions): ProviderAdapter {
               { role: "user", content: req.user },
             ],
             temperature: req.temperature ?? 0.7,
-            max_tokens: req.maxTokens ?? 2200,
+            max_tokens: req.maxTokens ?? env.ai.maxOutputTokens,
             ...(req.json ? { response_format: { type: "json_object" } } : {}),
           }),
           signal: controller.signal,

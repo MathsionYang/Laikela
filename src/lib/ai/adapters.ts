@@ -10,6 +10,7 @@
  * 「同一进程内平台 Key 与租户 BYOK 并存」的前提。
  */
 import { ProviderError, type TextRequest, type TextResult } from "@/lib/gateway/types";
+import { env } from "@/lib/env";
 
 interface CallOptions {
   baseUrl: string;
@@ -177,7 +178,7 @@ export async function chatCompletion(
   opts: CallOptions & TextRequest & { label: string; priceIn: number; priceOut: number },
 ): Promise<TextResult> {
   const started = Date.now();
-  const maxTokens = opts.maxTokens ?? 2200;
+  const maxTokens = opts.maxTokens ?? env.ai.maxOutputTokens;
   const ctx: CallContext = {
     label: opts.label,
     model: opts.model,
@@ -213,10 +214,19 @@ export async function chatCompletion(
   };
   const choice = data.choices?.[0];
   const content = choice?.message?.content ?? "";
+  /**
+   * finish_reason=length 表示「写满了 max_tokens 被掐断」。
+   *
+   * 正文为空好判断；**正文非空也不能当成成功** —— 截断发生在 JSON 中间时，
+   * 拿到的是一段能看见、但解析不了的内容，旧代码会把它报成
+   * 「返回内容不是预期的 JSON 结构」，让用户以为是模型不听话。
+   * 这里如实把 finishReason 透传出去，由上层先尝试解析、失败再按截断报错。
+   */
+  const finishReason = choice?.finish_reason;
   if (!content.trim()) {
     // 三种「看起来成功、其实没交付」的情况要分清，否则用户只看到「返回空内容」无从下手
     const reasoning = choice?.message?.reasoning_content ?? "";
-    if (choice?.finish_reason === "length") {
+    if (finishReason === "length") {
       throw new ProviderError(
         "TRUNCATED",
         `${opts.label}（model=${opts.model}）输出被截断：max_tokens=${maxTokens} 用尽时只产出了推理过程（${reasoning.length} 字），没有正文。请调大 max_tokens（推理型模型建议 ≥ 1500）后重试。`,
@@ -250,6 +260,8 @@ export async function chatCompletion(
     },
     latencyMs: Date.now() - started,
     local: false,
+    finishReason,
+    maxTokens,
   };
 }
 
