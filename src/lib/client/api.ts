@@ -89,6 +89,8 @@ export interface ClientJob {
   output: Record<string, unknown> | null;
   provider: string | null;
   model: string | null;
+  /** 创建时路由选定的模型（目录 key），回填参数时要把它一起恢复 */
+  modelKey?: string | null;
   promptVersion: string | null;
   error: { code: string; message: string } | null;
   cost: number;
@@ -200,8 +202,13 @@ export const useJobList = (opts: { tool?: string; limit?: number } = {}) => {
 export function useCreateJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { tool: string; input: Record<string, unknown>; modelKey?: string | null }) =>
-      apiPost<ClientJob>("/api/jobs", vars),
+    mutationFn: (vars: {
+      tool: string;
+      input: Record<string, unknown>;
+      modelKey?: string | null;
+      /** 本次参数来自哪条任务（历史版本「载入后重跑」），只做溯源，不影响计费 */
+      parentJobId?: string | null;
+    }) => apiPost<ClientJob>("/api/jobs", vars),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["jobs"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });

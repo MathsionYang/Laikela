@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { baseCredits } from "@/lib/domain/pricing";
+import { mergeInput, type ToolDef } from "@/lib/domain/tools";
 import { JobProgress } from "@/components/workbench/JobProgress";
 import { ResultView } from "@/components/workbench/ResultView";
 import { ToolForm } from "@/components/workbench/ToolForm";
@@ -14,7 +15,59 @@ import {
   useJob,
   useJobList,
   useTools,
+  type ClientAsset,
+  type ClientJob,
 } from "@/lib/client/api";
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+/**
+ * 把历史任务 input 里的上传字段（素材 id 列表）还原成可展示的文件。
+ * 素材可能已被删除 —— 删掉的不静默忽略，交给调用方提示「请重新上传」，
+ * 否则用户会带着一个不存在的 asset id 提交，任务跑到一半才报错。
+ */
+async function loadUploads(
+  tool: ToolDef,
+  input: Record<string, unknown>,
+): Promise<{ uploads: Record<string, ClientAsset[]>; missing: string[] }> {
+  const uploads: Record<string, ClientAsset[]> = {};
+  const missing: string[] = [];
+
+  await Promise.all(
+    tool.fields
+      .filter((f) => f.type === "upload")
+      .map(async (f) => {
+        const ids = String(input[f.id] ?? "")
+          .split(",")
+          .filter(Boolean);
+        if (!ids.length) return;
+        const got = await Promise.all(
+          ids.map(async (id) => {
+            try {
+              const res = await fetch(`/api/assets/${id}`);
+              if (!res.ok) return null;
+              const json = (await res.json()) as { data?: ClientAsset };
+              return json.data ?? null;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        const alive = got.filter((x): x is ClientAsset => Boolean(x));
+        if (alive.length < ids.length) missing.push(f.label);
+        if (alive.length) uploads[f.id] = alive;
+      }),
+  );
+
+  return { uploads, missing };
+}
 
 export default function ToolPage() {
   const params = useParams<{ slug: string }>();
@@ -25,11 +78,30 @@ export default function ToolPage() {
   const tool = toolsData?.tools.find((t) => t.slug === slug);
 
   const [jobId, setJobId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const create = useCreateJob();
   const cancel = useCancelJob();
   const { data: jobData } = useJob(jobId);
   const { data: history } = useJobList({ tool: slug, limit: 8 });
+
+  /**
+   * 历史版本回填。
+   *   seed        —— 要灌进表单的参数（null = 空白表单）
+   *   formKey     —— 变化即重建 ToolForm，这是最干净的重置方式（无需同步副作用）
+   *   seedFrom    —— 当前表单内容来自哪条任务；null 表示是用户自己从空白填的
+   *   parentNext  —— 下次提交要挂的 parent_job_id
+   *   dirty       —— 用户是否在当前表单上改动过（未提交）
+   */
+  const [seed, setSeed] = useState<{
+    values: Record<string, unknown>;
+    modelKey: string | null;
+    uploads: Record<string, ClientAsset[]>;
+  } | null>(null);
+  const [formKey, setFormKey] = useState(0);
+  const [seedFrom, setSeedFrom] = useState<string | null>(null);
+  const [seedFromAt, setSeedFromAt] = useState<string | null>(null);
+  const [parentNext, setParentNext] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   // SSE：进度实时推进（轮询仍在，作为断线兜底）
   const [live, setLive] = useState<{ status: string; stage: string; progress: number } | null>(
@@ -60,15 +132,85 @@ export default function ToolPage() {
     ? ["queued", "running", "post_processing", "reviewing"].includes(job.status)
     : false;
 
+  /**
+   * 提交 = 建新任务。若本次参数来自历史版本（parentNext 非空），
+   * 新任务挂 parent_job_id，只做溯源；原任务的状态与产出完全不被动。
+   */
   const submit = async (values: Record<string, unknown>, modelKey: string | null) => {
     if (!tool) return;
     setNotice(null);
+    const from = parentNext;
     try {
-      const created = await create.mutateAsync({ tool: tool.slug, input: values, modelKey });
+      const created = await create.mutateAsync({
+        tool: tool.slug,
+        input: values,
+        modelKey,
+        parentJobId: from,
+      });
       setJobId(created.id);
+      // 链式：再改一版时，新任务挂在「刚生成的这条」下，形成可追溯的修改链
+      setParentNext(created.id);
+      setDirty(false);
+      if (from) {
+        setNotice({
+          kind: "info",
+          text: `已按修改后的参数重新提交，新任务 ${created.id} 在队列中。原任务 ${from} 的记录与产出保持不变。`,
+        });
+      }
     } catch (e) {
-      setNotice((e as Error).message);
+      setNotice({ kind: "error", text: (e as Error).message });
     }
+  };
+
+  /**
+   * 点历史条目：切预览 + 回填参数。
+   * 幂等与草稿保护都在这里：同一版本连点不重复覆盖；有未提交改动时先问一句。
+   */
+  const loadFromHistory = async (h: ClientJob) => {
+    setJobId(h.id);
+    if (!tool) return;
+
+    if (!h.input || Object.keys(h.input).length === 0) {
+      setNotice({ kind: "error", text: "这条任务没有保存输入参数，只能查看产出。" });
+      return;
+    }
+    // 已经是这条的参数且没改过 —— 不必重灌，免得把光标和滚动位置打乱
+    if (seedFrom === h.id && !dirty) return;
+
+    if (dirty && !window.confirm("当前配置有未提交的修改，载入这条历史版本会覆盖它。继续？")) {
+      return;
+    }
+
+    const { values, dropped } = mergeInput(tool, h.input);
+    const { uploads, missing } = await loadUploads(tool, h.input);
+
+    setSeed({ values, modelKey: h.modelKey ?? null, uploads });
+    setFormKey((k) => k + 1);
+    setSeedFrom(h.id);
+    setSeedFromAt(h.createdAt);
+    setParentNext(h.id);
+    setDirty(false);
+
+    const notes: string[] = [];
+    if (dropped.length) notes.push(`${dropped.join("、")} 在当前版本已不可用，已回落默认值`);
+    if (missing.length) notes.push(`原上传文件已失效（${missing.join("、")}），请重新上传`);
+    setNotice({
+      kind: "info",
+      text: notes.length
+        ? `已载入 ${fmtTime(h.createdAt)} 的参数：${notes.join("；")}`
+        : `已载入 ${fmtTime(h.createdAt)} 那次提交的参数，可直接查看或修改后重新生成`,
+    });
+  };
+
+  /** 清掉回填，回到工具的空白默认值 */
+  const resetForm = () => {
+    setSeed(null);
+    setFormKey((k) => k + 1);
+    setSeedFrom(null);
+    setSeedFromAt(null);
+    setParentNext(null);
+    setDirty(false);
+    setNotice(null);
   };
 
   if (isLoading) {
@@ -156,15 +298,23 @@ export default function ToolPage() {
 
       {notice && (
         <div
-          className="rounded-[9px] border px-3 py-2 text-[11.5px]"
-          style={{
-            borderColor: "color-mix(in srgb, var(--rose) 40%, transparent)",
-            background: "var(--rose-soft)",
-            color: "var(--rose)",
-          }}
+          className="rounded-[9px] border px-3 py-2 text-[11.5px] leading-relaxed"
+          style={
+            notice.kind === "error"
+              ? {
+                  borderColor: "color-mix(in srgb, var(--rose) 40%, transparent)",
+                  background: "var(--rose-soft)",
+                  color: "var(--rose)",
+                }
+              : {
+                  borderColor: "color-mix(in srgb, var(--jade) 35%, transparent)",
+                  background: "var(--jade-soft)",
+                  color: "var(--jade)",
+                }
+          }
           role="alert"
         >
-          {notice}
+          {notice.text}
         </div>
       )}
 
@@ -177,7 +327,42 @@ export default function ToolPage() {
               {tool.fields.filter((f) => f.required).length} 个必填
             </span>
           </div>
-          <ToolForm tool={tool} busy={create.isPending} onSubmit={submit} />
+
+          {seedFrom && (
+            <div
+              className="mb-3 flex items-start justify-between gap-2 rounded-[8px] px-2.5 py-2"
+              style={{
+                background: "var(--gold-soft)",
+                boxShadow: "inset 0 0 0 1px var(--gold-line)",
+              }}
+            >
+              <span className="text-[10.5px] leading-relaxed" style={{ color: "var(--gold)" }}>
+                参数来自 {fmtTime(seedFromAt ?? new Date().toISOString())} 的版本
+                <span className="block" style={{ color: "var(--t3)" }}>
+                  改完点生成会新建一条任务，原来那条不动
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="shrink-0 text-[10.5px] underline"
+                style={{ color: "var(--t3)" }}
+              >
+                恢复默认
+              </button>
+            </div>
+          )}
+
+          <ToolForm
+            key={formKey}
+            tool={tool}
+            busy={create.isPending}
+            onSubmit={submit}
+            initialValues={seed?.values ?? null}
+            initialModelKey={seed?.modelKey ?? null}
+            initialUploads={seed?.uploads}
+            onDirtyChange={setDirty}
+          />
         </section>
 
         {/* 中：预览 */}
@@ -305,7 +490,7 @@ export default function ToolPage() {
                 <li key={h.id}>
                   <button
                     type="button"
-                    onClick={() => setJobId(h.id)}
+                    onClick={() => void loadFromHistory(h)}
                     className="flex w-full items-center gap-2 border-b py-2 text-left last:border-0"
                     style={{ borderColor: "var(--line)" }}
                   >
@@ -318,17 +503,26 @@ export default function ToolPage() {
                             : "dot-queued"
                       }`}
                     />
-                    <span className="mono min-w-0 flex-1 truncate text-[10.5px]" style={{ color: "var(--t3)" }}>
-                      {new Date(h.createdAt).toLocaleString("zh-CN", {
-                        month: "2-digit",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                      })}
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className="mono block truncate text-[10.5px]"
+                        style={{ color: "var(--t3)" }}
+                      >
+                        {fmtTime(h.createdAt)}
+                      </span>
+                      <span className="block truncate text-[10px]" style={{ color: "var(--t2)" }}>
+                        {inputSummary(tool, h.input)}
+                      </span>
                     </span>
-                    <span className="mono text-[10px]" style={{ color: h.id === jobId ? "var(--gold)" : "var(--t3)" }}>
-                      {h.status === "succeeded" ? "查看" : h.status}
+                    <span
+                      className="mono shrink-0 text-[10px]"
+                      style={{ color: seedFrom === h.id ? "var(--gold)" : "var(--t3)" }}
+                    >
+                      {seedFrom === h.id
+                        ? "已载入"
+                        : h.status === "succeeded"
+                          ? "查看"
+                          : h.status}
                     </span>
                   </button>
                 </li>
@@ -368,4 +562,19 @@ function unitWord(kind: string): string {
   if (kind === "video") return "秒";
   if (kind === "audio") return "千字符";
   return "千 token";
+}
+
+/**
+ * 历史列表里的一行摘要。只有时间的话，用户根本分不出哪条是自己要的那个版本；
+ * 取第一个有值的文本字段，比列出全部参数省地方。
+ */
+function inputSummary(tool: ToolDef, input: Record<string, unknown> | null | undefined): string {
+  if (!input) return "（这条没有保存参数）";
+  for (const f of tool.fields) {
+    const v = String(input[f.id] ?? "").trim();
+    if (!v) continue;
+    if (f.type === "upload") return `${f.label}：${v.split(",").filter(Boolean).length} 个文件`;
+    return v.length > 26 ? `${v.slice(0, 26)}…` : v;
+  }
+  return "（这条没有保存参数）";
 }

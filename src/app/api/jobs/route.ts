@@ -3,7 +3,7 @@ import { fail, ok, readJson } from "@/lib/api";
 import { ensureDb } from "@/lib/db";
 import { requireSession } from "@/lib/session-api";
 import { getTool } from "@/lib/domain/tools";
-import { audit, createJob, listJobs, updateJob } from "@/lib/jobs/repo";
+import { audit, createJob, getJob, listJobs, updateJob } from "@/lib/jobs/repo";
 import { enqueue } from "@/lib/jobs/queue";
 import { clientJob } from "@/lib/jobs/serialize";
 import { balance, consume } from "@/lib/credits";
@@ -55,9 +55,22 @@ export async function POST(req: NextRequest) {
     tool?: string;
     input?: Record<string, unknown>;
     modelKey?: string | null;
+    parentJobId?: string | null;
   }>(req);
   const tool = body.tool ? getTool(body.tool) : undefined;
   if (!tool) return fail("NO_TOOL", `未知工具：${body.tool ?? "(空)"}`, 404);
+
+  // 溯源用：参数是从哪条历史任务改出来的。只做记录，不改变计费与产出归属。
+  // 校验归属与工具，避免拿别人的 job id 串进来（org 隔离靠这道检查）。
+  let parentJobId: string | null = null;
+  if (body.parentJobId) {
+    const parent = await getJob(body.parentJobId, session.orgId);
+    if (!parent) return fail("PARENT_NOT_FOUND", "来源任务不存在或不属于当前空间", 404);
+    if (parent.tool_slug !== tool.slug) {
+      return fail("PARENT_MISMATCH", "来源任务与当前工具不一致，无法关联", 422);
+    }
+    parentJobId = parent.id;
+  }
 
   const input = body.input ?? {};
   for (const f of tool.fields) {
@@ -107,6 +120,7 @@ export async function POST(req: NextRequest) {
     toolSlug: tool.slug,
     input,
     modelKey: model.spec.key,
+    parentJobId,
   });
 
   const charged = await consume({

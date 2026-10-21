@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import type { ToolDef, ToolField } from "@/lib/domain/tools";
-import { defaultInput } from "@/lib/domain/tools";
+import { mergeInput } from "@/lib/domain/tools";
 import { baseCredits, LOCAL_ETA_FACTOR, quoteCost, unitsOf } from "@/lib/domain/pricing";
 import { uploadAssets, useModels, type ClientAsset, type ModelPayload, type ToolQuote } from "@/lib/client/api";
 
@@ -13,6 +13,13 @@ interface Props {
   tool: ToolDef & { quote?: ToolQuote | null };
   busy: boolean;
   onSubmit: (values: Record<string, unknown>, modelKey: string | null) => void;
+  /** 从历史版本载入的参数；不传就是空白表单。父组件用 key 重建来触发重置 */
+  initialValues?: Record<string, unknown> | null;
+  initialModelKey?: string | null;
+  /** 上传类字段的已选素材（按字段 id 分组），回填时用来显示文件名 */
+  initialUploads?: Record<string, ClientAsset[]>;
+  /** 用户改动过表单就报 true —— 父组件用它做「载入历史会不会覆盖草稿」的保护 */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /** 工具产出类型 → 模型类型 */
@@ -31,11 +38,23 @@ const UNIT_LABEL: Record<string, string> = {
   audio: "千字符",
 };
 
-export function ToolForm({ tool, busy, onSubmit }: Props) {
-  const [values, setValues] = useState<Record<string, unknown>>(() => defaultInput(tool));
+export function ToolForm({
+  tool,
+  busy,
+  onSubmit,
+  initialValues,
+  initialModelKey,
+  initialUploads,
+  onDirtyChange,
+}: Props) {
+  // 初始化时就把历史参数合进来：父组件通过 key 变化重建本组件，
+  // 所以这里不需要 useEffect 去同步外部值，也就没有「输入框闪一下」的问题。
+  const [values, setValues] = useState<Record<string, unknown>>(
+    () => mergeInput(tool, initialValues).values,
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [uploads, setUploads] = useState<Record<string, ClientAsset[]>>({});
-  const [modelKey, setModelKey] = useState<string>("");
+  const [uploads, setUploads] = useState<Record<string, ClientAsset[]>>(initialUploads ?? {});
+  const [modelKey, setModelKey] = useState<string>(initialModelKey ?? "");
 
   const { data: modelData } = useModels();
   const kind = MODEL_KIND[tool.kind] ?? "text";
@@ -71,6 +90,7 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
 
   const set = (id: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [id]: v }));
+    onDirtyChange?.(true);
     setErrors((prev) => {
       if (!prev[id]) return prev;
       const next = { ...prev };
@@ -106,9 +126,10 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
             error={errors[f.id]}
             uploads={uploads[f.id] ?? []}
             onChange={(v) => set(f.id, v)}
-            onUploaded={(assets) =>
-              setUploads((prev) => ({ ...prev, [f.id]: assets }))
-            }
+            onUploaded={(assets) => {
+              setUploads((prev) => ({ ...prev, [f.id]: assets }));
+              onDirtyChange?.(true);
+            }}
           />
         ))}
       </div>
@@ -126,7 +147,10 @@ export function ToolForm({ tool, busy, onSubmit }: Props) {
             id="fld-model"
             className="select"
             value={modelKey}
-            onChange={(e) => setModelKey(e.target.value)}
+            onChange={(e) => {
+              setModelKey(e.target.value);
+              onDirtyChange?.(true);
+            }}
           >
             <option value="">自动（按套餐与可用性挑选）</option>
             {options.map((m) => (

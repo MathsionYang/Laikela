@@ -553,3 +553,63 @@ export function defaultInput(tool: ToolDef): Record<string, string | number> {
   }
   return out;
 }
+
+/**
+ * 把「历史任务保存的 input」安全地合进当前工具的表单默认值。
+ *
+ * 回填不能直接 Object.assign(默认值, raw)，三种情况会静默出错：
+ *   · 旧任务里有、当前 schema 已删的字段 —— 原样提交会混进 pipeline，丢掉；
+ *   · select / picks 的值已不在选项里 —— `<select>` 会显示第一个选项、但内部值仍是旧的，
+ *     用户看着对、提交却是错的，必须回落默认值并把字段名报给调用方；
+ *   · range 超出新上下限 —— clamp 到边界，否则滑块显示与实际值不一致。
+ *
+ * 返回 dropped 供界面提示「哪些项因为工具改版没能回填」。
+ */
+export function mergeInput(
+  tool: ToolDef,
+  raw: Record<string, unknown> | null | undefined,
+): { values: Record<string, string | number>; dropped: string[] } {
+  const values = defaultInput(tool);
+  const dropped: string[] = [];
+  if (!raw) return { values, dropped };
+
+  for (const f of tool.fields) {
+    const v = raw[f.id];
+    if (v === undefined || v === null || v === "") continue;
+
+    if (f.type === "select") {
+      const s = String(v);
+      if (f.opts?.includes(s)) values[f.id] = s;
+      else dropped.push(`${f.label}（选项已变更）`);
+      continue;
+    }
+
+    if (f.type === "picks") {
+      const list = String(v).split(",").filter(Boolean);
+      const valid = list.filter((x) => f.opts?.includes(x));
+      if (!valid.length) {
+        dropped.push(`${f.label}（选项已变更）`);
+        continue;
+      }
+      if (valid.length !== list.length) dropped.push(`${f.label}（部分选项已失效）`);
+      values[f.id] = f.multi ? valid.join(",") : valid[0];
+      continue;
+    }
+
+    if (f.type === "range") {
+      const n = Number(v);
+      if (!Number.isFinite(n)) {
+        dropped.push(f.label);
+        continue;
+      }
+      const min = f.min ?? Number.NEGATIVE_INFINITY;
+      const max = f.max ?? Number.POSITIVE_INFINITY;
+      values[f.id] = Math.min(max, Math.max(min, n));
+      continue;
+    }
+
+    // text / textarea / upload：原样带回（upload 存的是素材 id，逗号分隔）
+    values[f.id] = String(v);
+  }
+  return { values, dropped };
+}
