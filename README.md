@@ -122,10 +122,11 @@ npm run serve -- --check       # 起来后再跑计费规则校验与模型连�
 > `QUEUE_DRIVER=auto` 同理，Redis 不可用时切进程内队列。功能完全一致，只是不适合多实例部署。
 > 想确认当前跑在哪套驱动上：`npm run doctor`，或 `GET /api/health`。
 
-常见启动问题：
+常见问题（启动 / 计费）：
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| `后台改成高级套餐，界面还是原来的积分、下单报积分不足` | 旧逻辑用 `grant:{org}:{月}` 做幂等键，本月已用体验版发过 200，升级时整月额度被当成「已发过」静默跳过 | 已改为按差额补齐（`topUpMonthly`）。存量租户执行 `npm run fix:plan-gap`（先预演），加 `-- --apply` 落库 |
 | `登录成功却立刻掉线` | http 环境下 `COOKIE_SECURE=1`，cookie 不回传 | 本机改成注释或 `0`，上了 HTTPS 再打开 |
 | 改了 `.env` 里的 Key 但没生效 | Key 在模块加载时读入 | 重启进程；BYOK 与自定义端点则即时生效 |
 | 任务卡在 `queued` 不动 | 没起 Worker | `npm run worker`，或用 `npm run dev:all` |
@@ -220,8 +221,20 @@ queued → running → post_processing → reviewing → succeeded
 四档套餐（`free` / `creator` / `studio` / `enterprise`），表结构 `plans × subscriptions × orders`。
 
 - `subscriptions(org_id) WHERE status='active'` 建**部分唯一索引**，数据库层面保证一个租户只有一条生效订阅，不靠应用层自觉。
-- 积分按自然月发放，中途换套餐当月不重复发（提示语会明确告知「本月额度已发放过，下月按新套餐发放」）。
+- 积分按自然月发放，口径是「**本月应得总额**」而不是「每开一次套餐各发一份」：中途换套餐只补差额（体验版 200 升企业版 95,000，就补 94,800），同月反复升降级因为「已发已达目标」不会重复拿，降级不回收已发积分。
+- 发放走 `topUpMonthly()`，读「本月已发」与写流水在同一把租户锁内完成，并发换套餐不会各补一份。
 - 取消续订 = `cancel_at_period_end`，当期不退款、到期不扣费；可恢复。
+
+### 历史版本回放
+
+工具页右侧的「历史版本」不只是看结果：点一下会把那条任务的**输入参数**回填到左侧表单，改完再提交，就是一条新任务。
+
+- 回填范围：`jobs.input` 全部字段 + `jobs.model_key`；产出、耗时、成本这些**不回填**——新任务按当前单价重算。
+- 字段要做清洗：选项已下线的回落默认值并提示、滑块越界 clamp、schema 里删掉的字段直接丢弃。不洗的话 `<select>` 会「显示第一项、内部值却是旧的」，看着对、提交是错的。
+- 重新入队挂 `parent_job_id` 指向参数来源任务，只做溯源；原任务的状态、产出、扣费记录一律不动。
+- 表单有未提交改动时先弹确认，同一版本连点不重复覆盖。
+
+完整规格（含边界情况表）见 [`docs/REPLAY-PARAMS.md`](docs/REPLAY-PARAMS.md)。
 
 ---
 
@@ -372,8 +385,15 @@ npm run check:ai
 | `RATE_LIMIT` | 429 | 触发限流 | 降并发 / 稍后重试 |
 | `CONTEXT_TOO_LONG` | 400 `maximum context` | 输入超窗口 | 精简输入 |
 | `TIMEOUT` / `NETWORK` | — | 45 秒无响应 / 出网不通 | 查代理、DNS、防火墙 |
-| `TRUNCATED` | `finish_reason=length` | `max_tokens` 用尽，只产出了推理过程没有正文 | 调大 `maxTokens` |
+| `TRUNCATED` | `finish_reason=length` | 写满 `max_tokens` 被截断，JSON 没收尾（也可能是推理把额度吃光、正文为空） | 自动重试一次并让它压缩篇幅；仍失败则调大 `AI_MAX_OUTPUT_TOKENS`（默认 8192）或把「输出数量 / 篇幅」调小 |
+| `BAD_JSON` | 200 `finish_reason=stop` | 模型没按结构写：要么压根不是 JSON，要么括号写错且修补不了 | 报错里会回显前 120 字，先看它到底写了什么；`npm run check:json` 可离线复跑修补逻辑 |
 | `EMPTY` | 200 但 `content` 为空 | 只回了 `reasoning_content`，或被安全策略拦 | 换模型 / 收紧输入 |
+
+**JSON 不再是「解析不了就整份作废」。** `json_object` 模式只保证「看起来像 JSON」，
+实测两类坏样本都会出现：表格行把 `]` 写成 `}`、以及写满长度被截断。
+`src/lib/ai/json-repair.ts` 会先修闭合符、再按最后一个完整元素截断补括号，
+修出来的内容还要过 `coerceBlocks` 结构校验 —— 修不好才重试，重试不成才降级。
+`npm run check:json` 是这条链路的离线回归（5 个真实坏样本 + 2 个反向用例）。
 
 远端彻底失败时任务**不会失败**，会降级到本地引擎并在结果上方挂一条黄色说明
 （`output.degraded`），里面带同一个 `error_code`，积分按本地模型重算并退回差额。
