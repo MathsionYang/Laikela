@@ -5,6 +5,10 @@
 
 [![来客啦 · AI 内容营销专家](docs/banner.svg)](https://github.com/MathsionYang/Laikela)
 
+[**简体中文**](README.md) | [English](README.en.md)
+
+[**在线演示 / Live Demo**](https://mathsionyang.github.io/Laikela/)：完整应用的静态功能预览，支持页面浏览；生成、上传、支付和保存等后端操作不可用。
+
 ### Content as Workflow ｜ 15 项 AI 内容能力，一条任务链路，从输入到积分结算
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.4-0D0F12?logo=nextdotjs&logoColor=D8A85E)
@@ -17,7 +21,7 @@
 ![Version](https://img.shields.io/badge/Version-v0.1.0-1D9E75?labelColor=0D0F12)
 ![License](https://img.shields.io/badge/License-MIT-D8A85E?labelColor=0D0F12)
 
-[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**账号与充值**](#-账号额度与充值) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界) · [**许可**](#-license)
+[**快速开始**](#-三分钟跑起来) · [**能力总览**](#-15-项能力总览) · [**核心设计**](#-核心设计) · [**积分账本**](#积分账本) · [**账号与充值**](#accounts-and-payments) · [**模型接入**](#-模型接入三条路径) · [**接口清单**](#-接口清单) · [**已知边界**](#-已知边界) · [**作者主页**](#author) · [**许可**](#-license)
 
 ---
 
@@ -275,6 +279,8 @@ queued → running → post_processing → reviewing → succeeded
 ---
 
 
+<a id="accounts-and-payments"></a>
+
 ### 注册必须先过邮箱验证
 
 注册接口 `POST /api/auth/register` **只建账号、不发会话**，同时下发一封 6 位验证码邮件；`POST /api/auth/verify-email` 校验通过后才 `createSession`。未验证账号去登录，会拿到 `403 EMAIL_UNVERIFIED`，前端直接切到验证面板并自动补发一封。
@@ -528,6 +534,17 @@ worker/index.ts               BullMQ 消费者入口
 - **计费量里仍有估算成分。** `billing.base` 按表单档位与流水线实际产出对齐，但文本类 token 数是估算值；上线两周后按 `usage_records` 的 P90 回填校准。
 - **素材没有回收站。** `DELETE /api/assets/[id]` 是硬删除（文件 + 记录），删掉不可恢复；删除写 `audit_logs` 留痕，但不保留副本。需要「误删恢复」的话，得加 `deleted_at` 软删与到期清理。
 - **无单元测试与 CI。** 验证方式是端到端探针脚本，未沉淀成测试用例。
+
+---
+
+<a id="author"></a>
+
+## 作者主页
+
+作者：[MathsionYang](https://github.com/MathsionYang)
+
+- **CSDN**：[技术博客](https://blog.csdn.net/sinat_28228747?spm=1000.2115.3001.10640)
+- **知乎**：[个人主页](https://www.zhihu.com/people/yang811)
 
 ---
 
