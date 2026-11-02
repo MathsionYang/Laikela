@@ -1,3 +1,8 @@
+<a href="https://reboosty-reboosty.vercel.app/api?repo_url=https://github.com/moe-mizrak/laravel-openrouter" target="_blank">
+  <img src="https://reboosty-reboosty.vercel.app/api?repo_url=https://github.com/moe-mizrak/laravel-openrouter" alt="reboosty" />
+</a>
+
+
 [![来客啦 · AI 内容营销专家](docs/banner.svg)](https://github.com/MathsionYang/Laikela)
 
 ### Content as Workflow ｜ 15 项 AI 内容能力，一条任务链路，从输入到积分结算
