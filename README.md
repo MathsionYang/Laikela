@@ -1,5 +1,5 @@
-<a href="https://reboosty-reboosty.vercel.app/api?repo_url=https://github.com/moe-mizrak/laravel-openrouter" target="_blank">
-  <img src="https://reboosty-reboosty.vercel.app/api?repo_url=https://github.com/moe-mizrak/laravel-openrouter" alt="reboosty" />
+<a href="https://reboosty-reboosty.vercel.app/api?repo_url=https://github.com/MathsionYang/Laikela" target="_blank">
+  <img src="https://reboosty-reboosty.vercel.app/api?repo_url=[https://github.com/moe-mizrak/laravel-openrouter](https://github.com/MathsionYang/Laikela)" alt="reboosty" />
 </a>
 
 
