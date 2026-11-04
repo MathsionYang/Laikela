@@ -537,8 +537,9 @@ worker/index.ts               BullMQ 消费者入口
 
 ---
 ## 星星
-[![Stargazers repo roster for @MathsionYang/Laikela](https://reporoster.com/stars/MathsionYang/Laikela)](https://github.com/MathsionYang/Laikela/stargazers)
 
+[![Stargazers](https://readme-contribs.as93.net/stargazers/MathsionYang/Laikela)](https://github.com/MathsionYang/Laikela/stargazers)
+[![Stargazers](https://readme-contribs.as93.net/stargazers/MathsionYang/Laikela?perRow=16&limit=96&fontSize=10)](https://github.com/MathsionYang/Laikela/stargazers)
 
 <a id="author"></a>
 
