@@ -536,6 +536,9 @@ worker/index.ts               BullMQ 消费者入口
 - **无单元测试与 CI。** 验证方式是端到端探针脚本，未沉淀成测试用例。
 
 ---
+## 星星
+[![Stargazers repo roster for @MathsionYang/Laikela](https://reporoster.com/stars/MathsionYang/Laikela)](https://github.com/MathsionYang/Laikela/stargazers)
+
 
 <a id="author"></a>
 
